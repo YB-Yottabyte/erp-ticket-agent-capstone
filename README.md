@@ -1,0 +1,75 @@
+# Order-to-Cash Ticket Diagnosis Agent
+
+Diagnose why an ERP transaction is stuck, given only a vague support ticket.
+
+Every ticket is generated from a fault deliberately injected into a synthetic
+ERP, so the correct answer is known before anything runs and scoring is fully
+automatic. No real data is used anywhere.
+
+## Baselines
+
+Two baselines are included: **B0** (regex rules, no model, no database) and
+**B1** (a single LLM call, ticket text only, no database access). Neither can
+query the ERP — that's deliberate, and is what a future tool-using agent will
+have to improve on.
+
+## Requirements
+
+Python 3.9+ (developed and tested on 3.13). **No third-party packages** —
+standard library only, so there is nothing to `pip install`.
+
+## Run it
+
+```bash
+python -m erpsim.build_world --seed 42 --out data/erp.db
+python run_baseline.py --input examples/test1.txt --score
+```
+
+That works offline with no API key: the default `--provider mock` is a
+deterministic stub that exercises the whole pipeline.
+
+## Run it against a real model
+
+```bash
+cp .env.example .env      # then paste in one key
+python run_baseline.py --input examples/test1.txt --provider gemini --score
+```
+
+Set one of `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`. The
+`mock` provider is a pipeline stub, never a system under test — every
+measured number must come from a real provider.
+
+## Everything else
+
+```bash
+python run_baseline.py --all --baseline b0 --score            # rule baseline
+python run_baseline.py --all --baseline b1 --provider gemini --score
+python run_baseline.py --ticket TKT-1005 --score
+```
+
+## Layout
+
+```
+erpsim/build_world.py   world + fault injection + ticket generation
+erpsim/schema.sql       12 ERP tables, plus tickets and fault_log
+erpsim/taxonomy.py      the closed root-cause vocabulary
+agents/llm.py           provider-agnostic client (urllib, no SDKs)
+agents/baseline.py      B0 keyword rules, B1 single LLM call
+eval/score.py           grading against fault_log
+run_baseline.py         CLI
+```
+
+`data/erp.db` is regenerated from the seed, not committed.
+
+## The answer key
+
+`fault_log` holds the ground truth. It lives in the same SQLite file but will
+have **no accessor in the tool layer** — the scorer reads it directly, the
+agent never can.
+
+## Troubleshooting
+
+Free-tier API keys (especially Gemini) may throttle and return `429`/`503`.
+`llm.py` retries automatically with backoff, but for quick pipeline testing,
+use `--provider mock` — it's deterministic, keyless, and exercises the same
+code path without hitting rate limits.

@@ -1,0 +1,6 @@
+TICKET: TKT-1011
+FROM: ops@everline.example
+CREATED: 2026-09-04
+SUBJECT: Everline Supply Co invoice held up
+
+The Everline Supply Co invoice is being held and I can't work out why. Everything upstream looks complete to me. Please advise. Reference INV-0342 if that helps.
