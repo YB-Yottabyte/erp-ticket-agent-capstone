@@ -10,12 +10,12 @@ automatic. No real data is used anywhere.
 
 Two baselines are included: **B0** (regex rules, no model, no database) and
 **B1** (a single LLM call, ticket text only, no database access). Neither can
-query the ERP — that's deliberate, and is what a future tool-using agent will
+query the ERP, and is what a future tool-using agent will
 have to improve on.
 
 ## Requirements
 
-Python 3.9+ (developed and tested on 3.13). **No third-party packages** —
+Python 3.9+ (developed and tested on 3.13). **No third-party packages** :
 standard library only, so there is nothing to `pip install`.
 
 ## Run it
@@ -36,7 +36,7 @@ python run_baseline.py --input examples/test1.txt --provider gemini --score
 ```
 
 Set one of `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`. The
-`mock` provider is a pipeline stub, never a system under test — every
+`mock` provider is a pipeline stub, never a system under test, every
 measured number must come from a real provider.
 
 ## Everything else
@@ -64,12 +64,12 @@ run_baseline.py         CLI
 ## The answer key
 
 `fault_log` holds the ground truth. It lives in the same SQLite file but will
-have **no accessor in the tool layer** — the scorer reads it directly, the
+have **no accessor in the tool layer**: the scorer reads it directly, the
 agent never can.
 
 ## Troubleshooting
 
 Free-tier API keys (especially Gemini) may throttle and return `429`/`503`.
 `llm.py` retries automatically with backoff, but for quick pipeline testing,
-use `--provider mock` — it's deterministic, keyless, and exercises the same
+use `--provider mock`: it's deterministic, keyless, and exercises the same
 code path without hitting rate limits.
