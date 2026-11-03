@@ -9,6 +9,7 @@ DEFAULT_MODEL = {
     "anthropic": "claude-sonnet-5",
     "openai": "gpt-4o-mini",
     "mock": "mock-stub-v1",
+    "groq": "openai/gpt-oss-20b",
 }
 
 
@@ -109,6 +110,35 @@ def complete(prompt, provider="mock", model=None, temperature=0.0):
         u = r.get("usage", {})
         return text, {"input_tokens": u.get("prompt_tokens", 0),
                       "output_tokens": u.get("completion_tokens", 0)}
+
+    if provider == "groq":
+        key = os.environ.get("GROQ_API_KEY")
+        if not key:
+            raise LLMError("GROQ_API_KEY not set(see .env.example)")
+
+        body = {
+            "model": model,
+            "temperature": temperature,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "user", "content": prompt},
+            ]
+        }
+
+        r = _post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            body,
+            {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {key}",
+                "User-Agent": "ERP-Ticket-Agent/1.0",
+            },
+        )
+        usage = r.get("usage", {})
+        return r["choices"][0]["message"]["content"], {
+            "input_tokens": usage.get("prompt_tokens", 0),
+            "output_tokens": usage.get("completion_tokens", 0),
+        }
 
     raise LLMError(f"unknown provider: {provider}")
 
