@@ -78,7 +78,10 @@ class AgentCLI:
             )
             if terminal:
                 terminal.show_header(
-                    ticket["id"], client.model, arguments.max_tool_calls
+                    ticket["id"],
+                    client.model,
+                    arguments.max_tool_calls,
+                    subject=ticket.get("subject"),
                 )
             with terminal.waiting() if terminal else nullcontext():
                 result = agent.run(

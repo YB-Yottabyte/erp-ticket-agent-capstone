@@ -71,7 +71,7 @@ class TerminalTests(unittest.TestCase):
             "╰",
             ">_ ERP Ticket Agent",
             "GPT-OSS 20B via Groq",
-            "● get_invoice",
+            "● Read invoice",
             "├─",
             "INV-0009",
             "Recommended action",
@@ -127,7 +127,7 @@ class TerminalTests(unittest.TestCase):
     def test_null_tax_id(self):
         terminal = TerminalUI(StringIO())
         facts = terminal._record_facts({"customer": {"id": "C-100", "tax_id": None}})
-        self.assertIn(("tax id: ", None), facts)
+        self.assertIn(("Tax ID: ", "Missing"), facts)
 
     # Distinguish failed lookups and cache hits from successful new database reads.
     def test_failure_and_cache(self):
@@ -162,8 +162,8 @@ class TerminalTests(unittest.TestCase):
             terminal._reveal("First sentence. Second sentence.")
         self.assertIn("First sentence.\n", stream.getvalue())
         self.assertIn("Second sentence.\n", stream.getvalue())
-        self.assertEqual(pause.call_args_list.count(unittest.mock.call(0.12)), 4)
-        self.assertIn(unittest.mock.call(0.6), pause.call_args_list)
+        self.assertEqual(pause.call_args_list.count(unittest.mock.call(0.08)), 4)
+        self.assertIn(unittest.mock.call(0.4), pause.call_args_list)
 
     # Keep redirected output and explicit no-animation mode free of delays.
     def test_animation_opt_out(self):

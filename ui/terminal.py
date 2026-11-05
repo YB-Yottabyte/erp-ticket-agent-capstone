@@ -50,6 +50,33 @@ class TerminalActivity:
 
 
 class TerminalUI:
+    TOOL_LABELS = {
+        "find_document": "Find related documents",
+        "get_invoice": "Read invoice",
+        "get_sales_order": "Read sales order",
+        "get_customer": "Check customer account",
+        "get_delivery": "Check delivery",
+        "get_payments": "Check payments",
+        "get_price_list": "Check price-list dates",
+        "get_job_runs": "Check background jobs",
+    }
+    CAUSE_LABELS = {
+        "UNKNOWN": "Not enough evidence",
+        "CUSTOMER_ON_HOLD": "Customer account on hold",
+        "MISSING_TAX_ID": "Missing customer tax ID",
+        "STALE_PRICE_LIST": "Expired price list",
+        "INCOMPLETE_DELIVERY_BLOCKS_INVOICE": "Incomplete delivery",
+        "CREDIT_LIMIT_STALE_SYNC": "Credit sync not updated",
+        "PRICE_SYNC_JOB_FAILED": "Price-sync job failed",
+    }
+    ACTION_LABELS = {
+        "RERUN_JOB": "Review and rerun the job",
+        "UPDATE_FIELD": "Review and update the field",
+        "RELEASE_HOLD": "Review and release the hold",
+        "REPRICE_ORDER": "Review and reprice the order",
+        "COMPLETE_DELIVERY": "Review and complete delivery",
+        "ESCALATE": "Ask a support analyst to investigate",
+    }
     COLORS = {
         "accent": "\033[1;38;5;214m",
         "green": "\033[1;38;5;114m",
@@ -109,7 +136,7 @@ class TerminalUI:
             self._line(text, indent=indent)
             return
         sentences = re.split(r"(?<=[.!?])\s+", text)
-        delay = 0.12
+        delay = 0.08
         for index, sentence in enumerate(sentences):
             for line in textwrap.wrap(sentence, width=max(10, self.width - indent)) or [
                 ""
@@ -123,7 +150,28 @@ class TerminalUI:
                     self.stream.write("\n")
                     self.stream.flush()
             if index < len(sentences) - 1:
-                time.sleep(0.6)
+                time.sleep(0.4)
+
+    # Add numbered sections so readers can follow the investigation from top to bottom.
+    def _section(self, number, title):
+        self._line()
+        self._parts([(f"  {number}. ", "accent"), (title, "bold")])
+        self._line("  " + "─" * min(54, self.width - 2), "muted")
+
+    # Translate database values for display without changing the stored research data.
+    def _display_value(self, field, value):
+        if value is None:
+            return "Missing" if field == "tax_id" else "Not set"
+        if field in {"on_hold", "applied_to_limit"} and value in (0, 1):
+            return "Yes" if value else "No"
+        if field in {"status", "blocked_reason", "block_reason"}:
+            return str(value).replace("_", " ").capitalize()
+        if field in {"amount", "credit_limit", "credit_used"} and type(value) in (
+            int,
+            float,
+        ):
+            return f"{value:,.2f}"
+        return value
 
     # Wrap ordinary paragraphs to fit the terminal instead of producing long lines.
     def _line(self, value="", style=None, indent=0):
@@ -134,23 +182,29 @@ class TerminalUI:
             self._parts([(" " * indent + line, style)])
 
     # Draw the reference-style header with a highlighted model and muted metadata.
-    def show_header(self, ticket_id, model, budget):
+    def show_header(self, ticket_id, model, budget, subject=None):
         friendly = {
             "openai/gpt-oss-20b": "GPT-OSS 20B via Groq",
             "openai/gpt-oss-120b": "GPT-OSS 120B via Groq",
         }.get(model, model)
         self._line()
         self._parts([("  Model: ", "bold"), (friendly, "accent")])
-        self._parts([("  Tool-call budget: ", "muted"), (str(budget), "teal")])
         self._line()
         panel_width = min(self.width, 82)
         inside = panel_width - 4
         rows = [
             (">_ ERP Ticket Agent", "accent"),
             ("", None),
-            (f"ticket: {self._safe(ticket_id)}", "muted"),
-            (f"model:  {self._safe(friendly)}", "muted"),
+            (f"Ticket: {self._safe(ticket_id)}", "teal"),
         ]
+        if subject:
+            rows.append((f"Issue:  {self._safe(subject)}", None))
+        mode = (
+            "Quick check · 1 lookup"
+            if budget == 1
+            else f"Investigation · Up to {budget} lookups"
+        )
+        rows.append((f"Mode:   {mode}", "muted"))
         self._line("╭" + "─" * (panel_width - 2) + "╮", "muted")
         for value, style in rows:
             for line in textwrap.wrap(value, width=inside) or [""]:
@@ -160,12 +214,10 @@ class TerminalUI:
         self._line("╰" + "─" * (panel_width - 2) + "╯", "muted")
         self._line()
         self._line(
-            "I'll inspect the ERP records linked to this ticket and gather evidence."
-        )
-        self._line(
-            "Read-only investigation · one tool at a time · recommendations only",
+            "The agent reads records and recommends a next step. It cannot change ERP data.",
             "muted",
         )
+        self._section(1, "Records checked")
 
     # Render short evidence trees with teal values and consistent continuation lines.
     def _tree(self, items):
@@ -207,7 +259,16 @@ class TerminalUI:
                     if name in row and (row[name] is not None or name == "tax_id")
                 ]
                 return [
-                    (name.replace("_", " ") + ": ", row[name]) for name in fields[:5]
+                    (
+                        (
+                            "Tax ID"
+                            if name == "tax_id"
+                            else name.replace("_", " ").capitalize()
+                        )
+                        + ": ",
+                        self._display_value(name, row[name]),
+                    )
+                    for name in fields[:5]
                 ]
         for key in ("matches", "deliveries", "payments", "job_runs"):
             rows = observation.get(key)
@@ -217,7 +278,7 @@ class TerminalUI:
                     if not isinstance(row, dict):
                         continue
                     details = [
-                        f"{name.replace('_', ' ')}={row[name]}"
+                        f"{name.replace('_', ' ')}: {self._display_value(name, row[name])}"
                         for name in (
                             "status",
                             "amount",
@@ -247,18 +308,19 @@ class TerminalUI:
         observation = record["observation"]
         success = observation.get("status") == "ok"
         cached = " · cached" if record.get("cache_hit") else ""
+        label = self.TOOL_LABELS.get(record["tool_name"], record["tool_name"])
         self._line()
         if self.width < 60:
             self._line(
-                f"● {record['tool_name']}  {used}/{budget} calls{cached}",
+                f"● {label}  {used}/{budget} lookups{cached}",
                 "green" if success else "yellow",
             )
         else:
             self._parts(
                 [
                     ("● ", "green" if success else "yellow"),
-                    (record["tool_name"], "green" if success else "yellow"),
-                    (f"  {used}/{budget} calls{cached}", "muted"),
+                    (label, "green" if success else "yellow"),
+                    (f"  {used}/{budget} lookups{cached}", "muted"),
                 ]
             )
         facts = (
@@ -275,11 +337,13 @@ class TerminalUI:
     def _summary_table(self, diagnosis, metrics):
         values = [
             diagnosis["ticket_id"],
-            diagnosis["root_cause_code"],
+            self.CAUSE_LABELS.get(
+                diagnosis["root_cause_code"], diagnosis["root_cause_code"]
+            ),
             f"{metrics['tool_calls']}/{metrics['tool_budget']}",
             f"{metrics['elapsed_seconds']:.2f}s",
         ]
-        headers = ["Ticket", "Cause (provisional)", "Calls", "Time"]
+        headers = ["Ticket", "Possible cause", "Lookups", "Time"]
         if self.width < 78:
             self._tree(
                 [(header + ": ", value) for header, value in zip(headers, values)]
@@ -310,19 +374,26 @@ class TerminalUI:
     # Present provisional findings, evidence claims, recommendations, and measured usage.
     def show_summary(self, result):
         diagnosis, metrics = result.diagnosis, result.metrics
-        self._line()
-        self._line("● Provisional diagnosis · human review required", "yellow")
+        self._section(2, "Preliminary finding")
+        self._line(
+            "Not a confirmed diagnosis. A person must review the evidence.",
+            "yellow",
+            indent=2,
+        )
         self._line()
         self._summary_table(diagnosis, metrics)
         self._line()
-        self._line("Evidence", "bold", indent=2)
+        self._line(f"Diagnosis code: {diagnosis['root_cause_code']}", "muted", indent=2)
+        self._line()
+        self._reveal(diagnosis.get("root_cause_explanation", ""), indent=2)
+        self._section(3, "Evidence cited by the model")
         evidence = diagnosis.get("evidence", [])
         if evidence:
             self._tree(
                 [
                     (
                         f"{item['entity']} {item['id']}: ",
-                        f"{item['field']} = {item['observed']}",
+                        f"{item['field'].replace('_', ' ')}: {item['observed']}",
                     )
                     for item in evidence[:5]
                 ]
@@ -338,22 +409,38 @@ class TerminalUI:
                 "No supporting records cited in the final answer.", "muted", indent=2
             )
         self._line(
-            "Not verified · record and value checks are not implemented yet.",
+            "Not verified · these citations have not been checked against the database.",
             "yellow",
             indent=2,
         )
-        self._line()
-        self._reveal(diagnosis.get("root_cause_explanation", ""), indent=2)
-        self._line()
-        self._line("Recommended action", "bold", indent=2)
+        self._section(4, "Recommended action")
         self._tree(
             [
-                ("Action: ", diagnosis["proposed_fix"]["action"]),
+                (
+                    "Next step: ",
+                    self.ACTION_LABELS.get(
+                        diagnosis["proposed_fix"]["action"],
+                        diagnosis["proposed_fix"]["action"],
+                    ),
+                ),
                 ("Target: ", diagnosis["proposed_fix"]["target"]),
-                ("Escalation: ", "Yes" if diagnosis["escalate"] else "No"),
+                (
+                    "Human review: ",
+                    "Required" if diagnosis["escalate"] else "Not requested",
+                ),
             ]
         )
         self._line("No database changes were made.", "muted", indent=2)
+        stop = {
+            "budget_limit": "Lookup limit reached. More investigation may be needed.",
+            "provider_error": "The model request failed. Try again later.",
+            "no_investigation": "No ERP records were retrieved.",
+            "invalid_output": "The final response could not be validated.",
+            "invalid_tool_response": "The model returned an unsupported tool request.",
+            "incomplete_model_response": "The model response was cut short.",
+            "model_final": "The model finished its investigation.",
+        }.get(metrics["termination_reason"], metrics["termination_reason"])
+        self._line(stop, "yellow", indent=2)
         self._line()
         usage = metrics["reported_tokens"]
         qualifier = "reported" if metrics["usage_complete"] else "partially reported"
@@ -367,9 +454,6 @@ class TerminalUI:
                 f"Completed in {metrics['elapsed_seconds']:.2f}s · {metrics['model_calls']} model calls · {metrics['retries']} retries",
                 "muted",
                 indent=2,
-            )
-            self._line(
-                f"Stop reason: {metrics['termination_reason']}", "muted", indent=2
             )
             self._line()
             return
@@ -394,5 +478,4 @@ class TerminalUI:
                 ),
             ]
         )
-        self._line(f"Stop reason: {metrics['termination_reason']}", "muted", indent=2)
         self._line()

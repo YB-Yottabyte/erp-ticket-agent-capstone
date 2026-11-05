@@ -25,10 +25,16 @@ trees, and an aligned final table. `--no-color` disables color without changing
 the layout. Narrow terminals stack the summary fields and wrap long text.
 
 Interactive terminals show a small waiting spinner and reveal the completed
-explanation at 0.12 seconds per word, with a 0.6-second pause between sentences. This is a display
+explanation at 0.08 seconds per word, with a 0.4-second pause between sentences. This is a display
 effect after generation, not token streaming from Groq. It does not change the
 recorded agent latency or token usage. Use `--no-animation` to disable both effects.
 Animations are disabled automatically for redirected output and JSON mode.
+
+The display follows four numbered sections: records checked, preliminary finding,
+evidence cited by the model, and recommended action. It shows the ticket subject,
+labels the one-call default as a quick check, and translates tool names and common
+ERP status codes into readable labels. Original codes and values remain unchanged
+in JSON output. Retrieved facts and unverified model citations stay visibly separate.
 
 The UI uses standard Python and ANSI colors, so Rich is not required. Colors are
 enabled only in a real terminal and respect `NO_COLOR` and `TERM=dumb`. Redirected
