@@ -1,4 +1,5 @@
 import argparse
+from contextlib import nullcontext
 import json
 from pathlib import Path
 import sqlite3
@@ -32,6 +33,11 @@ class AgentCLI:
         )
         self.parser.add_argument("--no-color", action="store_true")
         self.parser.add_argument(
+            "--no-animation",
+            action="store_true",
+            help="Disable the waiting spinner and sentence reveal",
+        )
+        self.parser.add_argument(
             "--out",
             help="Create a new JSON result file; existing files are not overwritten",
         )
@@ -64,15 +70,20 @@ class AgentCLI:
             dispatcher = ToolDispatcher(ToolRegistry(database))
             agent = ERPAgent(client, dispatcher, arguments.max_tool_calls)
             terminal = (
-                None if arguments.json else TerminalUI(color=not arguments.no_color)
+                None
+                if arguments.json
+                else TerminalUI(
+                    color=not arguments.no_color, animate=not arguments.no_animation
+                )
             )
             if terminal:
                 terminal.show_header(
                     ticket["id"], client.model, arguments.max_tool_calls
                 )
-            result = agent.run(
-                ticket, on_tool=terminal.show_tool_result if terminal else None
-            )
+            with terminal.waiting() if terminal else nullcontext():
+                result = agent.run(
+                    ticket, on_tool=terminal.show_tool_result if terminal else None
+                )
             serialized = json.dumps(result.to_dict(), indent=2, allow_nan=False)
             if arguments.out:
                 with open(arguments.out, "x", encoding="utf-8") as output:

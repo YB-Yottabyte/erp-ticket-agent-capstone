@@ -24,6 +24,12 @@ results in a bordered header, green progress markers, teal record values, eviden
 trees, and an aligned final table. `--no-color` disables color without changing
 the layout. Narrow terminals stack the summary fields and wrap long text.
 
+Interactive terminals show a small waiting spinner and reveal the completed
+explanation word by word, with a short pause between sentences. This is a display
+effect after generation, not token streaming from Groq. It does not change the
+recorded agent latency or token usage. Use `--no-animation` to disable both effects.
+Animations are disabled automatically for redirected output and JSON mode.
+
 The UI uses standard Python and ANSI colors, so Rich is not required. Colors are
 enabled only in a real terminal and respect `NO_COLOR` and `TERM=dumb`. Redirected
 output has no escape codes but retains the panel and tree layout. The optional

@@ -153,6 +153,46 @@ class TerminalTests(unittest.TestCase):
         self.assertIn("[bold]ticket", stream.getvalue())
         self.assertEqual(before, self.result.to_dict())
 
+    # Reveal words and pause between sentences only for interactive output.
+    def test_sentence_reveal(self):
+        stream = TerminalStream()
+        with patch.dict(os.environ, {"TERM": "xterm-256color"}, clear=True):
+            terminal = TerminalUI(stream, color=False)
+        with patch("ui.terminal.time.sleep") as pause:
+            terminal._reveal("First sentence. Second sentence.")
+        self.assertIn("First sentence.\n", stream.getvalue())
+        self.assertIn("Second sentence.\n", stream.getvalue())
+        self.assertIn(unittest.mock.call(0.18), pause.call_args_list)
+
+    # Keep redirected output and explicit no-animation mode free of delays.
+    def test_animation_opt_out(self):
+        for stream, enabled in ((StringIO(), True), (TerminalStream(), False)):
+            with self.subTest(enabled=enabled):
+                terminal = TerminalUI(stream, animate=enabled)
+                with patch("ui.terminal.time.sleep") as pause:
+                    terminal._reveal("A completed explanation.")
+                pause.assert_not_called()
+
+    # Stop the spinner thread and clear its line when the investigation fails.
+    def test_spinner_cleanup(self):
+        stream = TerminalStream()
+        with patch.dict(os.environ, {"TERM": "xterm-256color"}, clear=True):
+            terminal = TerminalUI(stream)
+        activity = terminal.waiting()
+        with self.assertRaises(RuntimeError):
+            with activity:
+                raise RuntimeError("test interruption")
+        self.assertFalse(activity.thread.is_alive())
+        self.assertFalse(terminal.activity_visible)
+
+    # Never start a background spinner for pipes or machine-readable output.
+    def test_no_spinner_for_redirected_output(self):
+        terminal = TerminalUI(StringIO())
+        with terminal.waiting() as activity:
+            terminal._line("progress")
+        self.assertIsNone(activity.thread)
+        self.assertNotIn("\033", terminal.stream.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

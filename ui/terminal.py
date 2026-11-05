@@ -3,6 +3,50 @@ import re
 import shutil
 import sys
 import textwrap
+import threading
+import time
+
+
+class TerminalActivity:
+    # Keep the waiting indicator separate from agent logic and output rendering.
+    def __init__(self, terminal):
+        self.terminal = terminal
+        self.stop = threading.Event()
+        self.thread = None
+
+    # Draw a small spinner only while waiting in an interactive terminal.
+    def _spin(self):
+        frames = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+        index = 0
+        while not self.stop.is_set():
+            with self.terminal.lock:
+                text = f"  {frames[index % len(frames)]} Investigating..."
+                if self.terminal.color:
+                    text = self.terminal.COLORS["muted"] + text + "\033[0m"
+                self.terminal.stream.write("\r\033[2K" + text)
+                self.terminal.stream.flush()
+                self.terminal.activity_visible = True
+            index += 1
+            self.stop.wait(0.1)
+
+    # Start the animation without blocking model requests or database lookups.
+    def __enter__(self):
+        if self.terminal.animate:
+            self.thread = threading.Thread(target=self._spin, daemon=True)
+            self.thread.start()
+        return self
+
+    # Clear the waiting line even when an error or keyboard interrupt occurs.
+    def __exit__(self, error_type, error, traceback):
+        self.stop.set()
+        if self.thread:
+            self.thread.join()
+        with self.terminal.lock:
+            if self.terminal.activity_visible:
+                self.terminal.stream.write("\r\033[2K")
+                self.terminal.stream.flush()
+                self.terminal.activity_visible = False
+        return False
 
 
 class TerminalUI:
@@ -16,7 +60,7 @@ class TerminalUI:
     }
 
     # Keep the same layout without extra libraries and color only real terminals.
-    def __init__(self, stream=None, color=True, width=None):
+    def __init__(self, stream=None, color=True, width=None, animate=True):
         self.stream = stream or sys.stderr
         self.color = (
             color
@@ -26,6 +70,13 @@ class TerminalUI:
         )
         available = width or shutil.get_terminal_size((100, 24)).columns
         self.width = max(32, min(100, available - 2))
+        self.animate = (
+            animate
+            and bool(getattr(self.stream, "isatty", lambda: False)())
+            and os.environ.get("TERM") != "dumb"
+        )
+        self.lock = threading.Lock()
+        self.activity_visible = False
 
     # Remove terminal controls and leave model and database text as literal content.
     @staticmethod
@@ -41,7 +92,38 @@ class TerminalUI:
             if self.color and style in self.COLORS:
                 text = self.COLORS[style] + text + "\033[0m"
             output.append(text)
-        print("".join(output), file=self.stream, flush=True)
+        with self.lock:
+            if self.activity_visible:
+                self.stream.write("\r\033[2K")
+                self.activity_visible = False
+            print("".join(output), file=self.stream, flush=True)
+
+    # Provide a waiting indicator that always stops when the investigation ends.
+    def waiting(self):
+        return TerminalActivity(self)
+
+    # Reveal completed explanation sentences smoothly without delaying research metrics.
+    def _reveal(self, value, indent=2):
+        text = self._safe(value)
+        if not self.animate:
+            self._line(text, indent=indent)
+            return
+        sentences = re.split(r"(?<=[.!?])\s+", text)
+        delay = min(0.035, 1.5 / max(1, len(text.split())))
+        for index, sentence in enumerate(sentences):
+            for line in textwrap.wrap(sentence, width=max(10, self.width - indent)) or [
+                ""
+            ]:
+                with self.lock:
+                    self.stream.write(" " * indent)
+                    for word in re.findall(r"\S+\s*", line):
+                        self.stream.write(word)
+                        self.stream.flush()
+                        time.sleep(delay)
+                    self.stream.write("\n")
+                    self.stream.flush()
+            if index < len(sentences) - 1:
+                time.sleep(0.18)
 
     # Wrap ordinary paragraphs to fit the terminal instead of producing long lines.
     def _line(self, value="", style=None, indent=0):
@@ -261,7 +343,7 @@ class TerminalUI:
             indent=2,
         )
         self._line()
-        self._line(diagnosis.get("root_cause_explanation", ""), indent=2)
+        self._reveal(diagnosis.get("root_cause_explanation", ""), indent=2)
         self._line()
         self._line("Recommended action", "bold", indent=2)
         self._tree(
