@@ -183,3 +183,54 @@ class ERPDatabase:
             "status": "ok",
             "deliveries": [dict(row) for row in rows],
         }
+
+    # Find payments: "C-128" -> payment records, or not_found if absent.
+    def get_payments(self, customer_id):
+        if not isinstance(customer_id, str):
+            return {
+                "status": "invalid_input",
+                "message": "Customer ID must be text",
+            }
+
+        customer_id = customer_id.strip()
+
+        if not customer_id.startswith("C-") or not customer_id[2:].isdigit():
+            return {
+                "status": "invalid_input",
+                "message": "Invalid customer ID",
+            }
+
+        try:
+            connection = self.connect()
+
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT id, customer_id, amount,
+                           received_at, applied_to_limit
+                    FROM payments
+                    WHERE customer_id = ?
+                    ORDER BY received_at DESC, id
+                    """,
+                    (customer_id,),
+                ).fetchall()
+            finally:
+                connection.close()
+
+        except sqlite3.Error:
+            return {
+                "status": "database_error",
+                "message": "Could not read the payments",
+            }
+
+        if not rows:
+            return {
+                "status": "not_found",
+                "message": "No payment records found for this customer",
+                "customer_id": customer_id,
+            }
+
+        return {
+            "status": "ok",
+            "payments": [dict(row) for row in rows],
+        }
