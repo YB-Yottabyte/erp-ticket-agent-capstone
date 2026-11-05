@@ -29,6 +29,8 @@ explanation at 0.08 seconds per word, with a 0.4-second pause between sentences.
 effect after generation, not token streaming from Groq. It does not change the
 recorded agent latency or token usage. Use `--no-animation` to disable both effects.
 Animations are disabled automatically for redirected output and JSON mode.
+Final evidence and action rows have a 0.35-second reveal interval. This pacing
+applies only after the agent returns; the displayed investigation time excludes it.
 
 The display follows four numbered sections: records checked, preliminary finding,
 evidence cited by the model, and recommended action. It shows the ticket subject,

@@ -105,6 +105,8 @@ class TerminalUI:
         self.lock = threading.Lock()
         self.activity_visible = False
 
+        self.summary_reveal = False
+
     # Remove terminal controls and leave model and database text as literal content.
     @staticmethod
     def _safe(value):
@@ -154,9 +156,15 @@ class TerminalUI:
 
     # Add numbered sections so readers can follow the investigation from top to bottom.
     def _section(self, number, title):
+        self._pause(0.35)
         self._line()
         self._parts([(f"  {number}. ", "accent"), (title, "bold")])
         self._line("  " + "─" * min(54, self.width - 2), "muted")
+
+    # Pace only the displayed summary, never live tool execution or redirected output.
+    def _pause(self, seconds):
+        if self.animate and self.summary_reveal:
+            time.sleep(seconds)
 
     # Translate database values for display without changing the stored research data.
     def _display_value(self, field, value):
@@ -222,6 +230,7 @@ class TerminalUI:
     # Render short evidence trees with teal values and consistent continuation lines.
     def _tree(self, items):
         for index, (label, value) in enumerate(items):
+            self._pause(0.35)
             last = index == len(items) - 1
             branch = "└─ " if last else "├─ "
             continuation = "   " if last else "│  "
@@ -371,8 +380,16 @@ class TerminalUI:
                 ]
             )
 
-    # Present provisional findings, evidence claims, recommendations, and measured usage.
+    # Animate the final display and always restore normal progress-output behavior.
     def show_summary(self, result):
+        self.summary_reveal = True
+        try:
+            self._show_summary(result)
+        finally:
+            self.summary_reveal = False
+
+    # Present provisional findings, evidence claims, recommendations, and measured usage.
+    def _show_summary(self, result):
         diagnosis, metrics = result.diagnosis, result.metrics
         self._section(2, "Preliminary finding")
         self._line(
@@ -451,7 +468,7 @@ class TerminalUI:
                 indent=2,
             )
             self._line(
-                f"Completed in {metrics['elapsed_seconds']:.2f}s · {metrics['model_calls']} model calls · {metrics['retries']} retries",
+                f"Investigation time: {metrics['elapsed_seconds']:.2f}s · {metrics['model_calls']} model calls · {metrics['retries']} retries",
                 "muted",
                 indent=2,
             )
@@ -470,7 +487,7 @@ class TerminalUI:
         )
         self._parts(
             [
-                ("  Completed in ", "muted"),
+                ("  Investigation time: ", "muted"),
                 (f"{metrics['elapsed_seconds']:.2f}s", "teal"),
                 (
                     f" · {metrics['model_calls']} model calls · {metrics['retries']} retries",

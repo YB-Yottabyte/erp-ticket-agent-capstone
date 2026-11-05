@@ -194,6 +194,20 @@ class TerminalTests(unittest.TestCase):
         self.assertIsNone(activity.thread)
         self.assertNotIn("\033", terminal.stream.getvalue())
 
+    # Pace evidence and action rows only after the measured investigation has ended.
+    def test_summary_row_pacing(self):
+        with patch.dict(os.environ, {"TERM": "xterm-256color"}, clear=True):
+            terminal = TerminalUI(TerminalStream(), color=False)
+        before = self.result.to_dict()
+        with patch("ui.terminal.time.sleep") as pause:
+            terminal.show_tool_result(self.record, 1, 1)
+            pause.assert_not_called()
+            terminal.show_summary(self.result)
+        self.assertGreaterEqual(pause.call_args_list.count(unittest.mock.call(0.35)), 6)
+        self.assertFalse(terminal.summary_reveal)
+        self.assertEqual(before, self.result.to_dict())
+        self.assertIn("Investigation time:", terminal.stream.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()
