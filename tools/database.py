@@ -234,3 +234,51 @@ class ERPDatabase:
             "status": "ok",
             "payments": [dict(row) for row in rows],
         }
+
+    # Find price list: "PL-13" -> validity dates, or not_found if absent.
+    def get_price_list(self, price_list_id):
+        if not isinstance(price_list_id, str):
+            return {
+                "status": "invalid_input",
+                "message": "Price list ID must be text",
+            }
+
+        price_list_id = price_list_id.strip()
+
+        if not price_list_id.startswith("PL-") or not price_list_id[3:].isdigit():
+            return {
+                "status": "invalid_input",
+                "message": "Invalid price list ID",
+            }
+
+        try:
+            connection = self.connect()
+
+            try:
+                row = connection.execute(
+                    """
+                    SELECT id, name, currency, valid_from, valid_to
+                    FROM price_lists
+                    WHERE id = ?
+                    """,
+                    (price_list_id,),
+                ).fetchone()
+            finally:
+                connection.close()
+
+        except sqlite3.Error:
+            return {
+                "status": "database_error",
+                "message": "Could not read the price list",
+            }
+
+        if row is None:
+            return {
+                "status": "not_found",
+                "price_list_id": price_list_id,
+            }
+
+        return {
+            "status": "ok",
+            "price_list": dict(row),
+        }
