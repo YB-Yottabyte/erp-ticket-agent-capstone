@@ -447,7 +447,7 @@ class TerminalUI:
                 ),
             ]
         )
-        self._line("No database changes were made.", "muted", indent=2)
+        self._line("No database changes were made", "muted", indent=2)
         stop = {
             "budget_limit": "Lookup limit reached. More investigation may be needed.",
             "provider_error": "The model request failed. Try again later.",
