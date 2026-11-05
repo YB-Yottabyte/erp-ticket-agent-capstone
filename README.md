@@ -48,8 +48,10 @@ summary. Start with one tool call:
 python3 -B run_agent.py --ticket TKT-1011
 ```
 
-Rich is optional (`python3 -m pip install -r requirements-ui.txt`); otherwise the
-terminal uses plain text. Evidence verification is not implemented yet, so results
+The terminal layout and colors use standard Python with no Rich dependency.
+Colors appear in interactive terminals; `--no-color` keeps the same layout without
+colors. The optional `requirements-ui.txt` provides a CA bundle for Python HTTPS.
+Evidence verification is not implemented yet, so results
 are provisional and escalated for review. See [agent terminal usage](docs/agent_terminal.md)
 for JSON output, budgets, metrics, and limitations. B0/B1 remain unchanged.
 

@@ -20,11 +20,14 @@ python3 -B run_agent.py --ticket TKT-1011 --json --out outputs/agent-first-run.j
 The output directory must already exist, and existing output files are never
 overwritten. The JSON mode writes a machine-readable object to stdout with no
 terminal UI. Interactive output goes to stderr. The terminal shows actual tool
-results and a compact final table, with an orange accent, muted labels, and green
-for successful lookups. `--no-color` disables color.
+results in a bordered header, green progress markers, teal record values, evidence
+trees, and an aligned final table. `--no-color` disables color without changing
+the layout. Narrow terminals stack the summary fields and wrap long text.
 
-Rich is optional; without it the UI uses plain text. The optional dependencies
-also include Certifi for Python installations without configured CA roots:
+The UI uses standard Python and ANSI colors, so Rich is not required. Colors are
+enabled only in a real terminal and respect `NO_COLOR` and `TERM=dumb`. Redirected
+output has no escape codes but retains the panel and tree layout. The optional
+dependency below provides Certifi for Python without configured CA roots:
 
 ```bash
 python3 -m pip install -r requirements-ui.txt
