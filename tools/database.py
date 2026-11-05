@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import date
 import sqlite3
 
 class ERPDatabase:
@@ -281,4 +282,81 @@ class ERPDatabase:
         return {
             "status": "ok",
             "price_list": dict(row),
+        }
+
+    # Find job runs: "credit_sync" + date range -> job history, or not_found.
+    def get_job_runs(self, job_name, date_range):
+        if not isinstance(job_name, str):
+            return {
+                "status": "invalid_input",
+                "message": "Job name must be text",
+            }
+
+        job_name = job_name.strip()
+
+        if job_name not in {"credit_sync", "price_sync", "ledger_post"}:
+            return {
+                "status": "invalid_input",
+                "message": "Unsupported job name",
+            }
+
+        if not isinstance(date_range, dict):
+            return {
+                "status": "invalid_input",
+                "message": "Date range must contain start_date and end_date",
+            }
+
+        start_date = date_range.get("start_date")
+        end_date = date_range.get("end_date")
+
+        try:
+            if not isinstance(start_date, str) or not isinstance(end_date, str):
+                raise ValueError
+
+            start = date.fromisoformat(start_date)
+            end = date.fromisoformat(end_date)
+
+            if start.isoformat() != start_date or end.isoformat() != end_date:
+                raise ValueError
+            if start > end:
+                raise ValueError
+
+        except ValueError:
+            return {
+                "status": "invalid_input",
+                "message": "Use valid YYYY-MM-DD dates with start_date <= end_date",
+            }
+
+        try:
+            connection = self.connect()
+
+            try:
+                rows = connection.execute(
+                    """
+                    SELECT id, job_name, started_at, status, error
+                    FROM job_runs
+                    WHERE job_name = ? AND started_at BETWEEN ? AND ?
+                    ORDER BY started_at DESC, id
+                    """,
+                    (job_name, start_date, end_date),
+                ).fetchall()
+            finally:
+                connection.close()
+
+        except sqlite3.Error:
+            return {
+                "status": "database_error",
+                "message": "Could not read the job history",
+            }
+
+        if not rows:
+            return {
+                "status": "not_found",
+                "message": "No job runs found in this date range",
+                "job_name": job_name,
+            }
+
+        return {
+            "status": "ok",
+            "job_runs": [dict(row) for row in rows],
         }
