@@ -360,3 +360,81 @@ class ERPDatabase:
             "status": "ok",
             "job_runs": [dict(row) for row in rows],
         }
+
+    # Find documents: "INV-0009", "SO-0001", or customer name -> candidates.
+    def find_document(self, reference):
+        if not isinstance(reference, str):
+            return {
+                "status": "invalid_input",
+                "message": "Reference must be text",
+            }
+
+        reference = reference.strip()
+
+        if not 3 <= len(reference) <= 200:
+            return {
+                "status": "invalid_input",
+                "message": "Reference must contain between 3 and 200 characters",
+            }
+
+        # Recognized IDs use exact matching; names use literal substring matching.
+        prefix = next(
+            (value for value in ("INV-", "SO-", "C-")
+             if reference.upper().startswith(value)),
+            None,
+        )
+        if prefix and not reference[len(prefix):].isdigit():
+            return {
+                "status": "invalid_input",
+                "message": "Invalid document or customer ID",
+            }
+
+        try:
+            connection = self.connect()
+
+            try:
+                rows = connection.execute(
+                    """
+                    WITH documents AS (
+                        SELECT 'Invoice' AS entity, id, customer_id, status,
+                               created_at AS document_date, so_id
+                        FROM invoices
+                        UNION ALL
+                        SELECT 'SalesOrder', id, customer_id, status,
+                               order_date, id
+                        FROM sales_orders
+                    )
+                    SELECT d.entity, d.id, d.customer_id,
+                           c.name AS customer_name, d.status,
+                           d.document_date, d.so_id
+                    FROM documents AS d
+                    JOIN customers AS c ON c.id = d.customer_id
+                    WHERE d.id = :reference COLLATE NOCASE
+                       OR d.customer_id = :reference COLLATE NOCASE
+                       OR (:search_name = 1 AND
+                           instr(lower(c.name), lower(:reference)) > 0)
+                    ORDER BY d.document_date DESC, d.entity, d.id
+                    LIMIT 21
+                    """,
+                    {"reference": reference, "search_name": int(prefix is None)},
+                ).fetchall()
+            finally:
+                connection.close()
+
+        except sqlite3.Error:
+            return {
+                "status": "database_error",
+                "message": "Could not search for documents",
+            }
+
+        if not rows:
+            return {
+                "status": "not_found",
+                "reference": reference,
+            }
+
+        return {
+            "status": "ok",
+            "matches": [dict(row) for row in rows[:20]],
+            "truncated": len(rows) > 20,
+        }
