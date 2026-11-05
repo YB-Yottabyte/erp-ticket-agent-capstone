@@ -25,7 +25,7 @@ trees, and an aligned final table. `--no-color` disables color without changing
 the layout. Narrow terminals stack the summary fields and wrap long text.
 
 Interactive terminals show a small waiting spinner and reveal the completed
-explanation word by word, with a short pause between sentences. This is a display
+explanation at 0.12 seconds per word, with a 0.6-second pause between sentences. This is a display
 effect after generation, not token streaming from Groq. It does not change the
 recorded agent latency or token usage. Use `--no-animation` to disable both effects.
 Animations are disabled automatically for redirected output and JSON mode.

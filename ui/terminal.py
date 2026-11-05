@@ -109,7 +109,7 @@ class TerminalUI:
             self._line(text, indent=indent)
             return
         sentences = re.split(r"(?<=[.!?])\s+", text)
-        delay = min(0.035, 1.5 / max(1, len(text.split())))
+        delay = 0.12
         for index, sentence in enumerate(sentences):
             for line in textwrap.wrap(sentence, width=max(10, self.width - indent)) or [
                 ""
@@ -123,7 +123,7 @@ class TerminalUI:
                     self.stream.write("\n")
                     self.stream.flush()
             if index < len(sentences) - 1:
-                time.sleep(0.18)
+                time.sleep(0.6)
 
     # Wrap ordinary paragraphs to fit the terminal instead of producing long lines.
     def _line(self, value="", style=None, indent=0):
