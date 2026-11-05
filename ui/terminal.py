@@ -138,7 +138,7 @@ class TerminalUI:
             self._line(text, indent=indent)
             return
         sentences = re.split(r"(?<=[.!?])\s+", text)
-        delay = 0.08
+        delay = 0.14
         for index, sentence in enumerate(sentences):
             for line in textwrap.wrap(sentence, width=max(10, self.width - indent)) or [
                 ""
@@ -152,11 +152,11 @@ class TerminalUI:
                     self.stream.write("\n")
                     self.stream.flush()
             if index < len(sentences) - 1:
-                time.sleep(0.4)
+                time.sleep(0.8)
 
     # Add numbered sections so readers can follow the investigation from top to bottom.
     def _section(self, number, title):
-        self._pause(0.35)
+        self._pause(0.7)
         self._line()
         self._parts([(f"  {number}. ", "accent"), (title, "bold")])
         self._line("  " + "─" * min(54, self.width - 2), "muted")
@@ -230,7 +230,7 @@ class TerminalUI:
     # Render short evidence trees with teal values and consistent continuation lines.
     def _tree(self, items):
         for index, (label, value) in enumerate(items):
-            self._pause(0.35)
+            self._pause(0.7)
             last = index == len(items) - 1
             branch = "└─ " if last else "├─ "
             continuation = "   " if last else "│  "

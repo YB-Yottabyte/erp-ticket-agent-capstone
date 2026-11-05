@@ -162,8 +162,8 @@ class TerminalTests(unittest.TestCase):
             terminal._reveal("First sentence. Second sentence.")
         self.assertIn("First sentence.\n", stream.getvalue())
         self.assertIn("Second sentence.\n", stream.getvalue())
-        self.assertEqual(pause.call_args_list.count(unittest.mock.call(0.08)), 4)
-        self.assertIn(unittest.mock.call(0.4), pause.call_args_list)
+        self.assertEqual(pause.call_args_list.count(unittest.mock.call(0.14)), 4)
+        self.assertIn(unittest.mock.call(0.8), pause.call_args_list)
 
     # Keep redirected output and explicit no-animation mode free of delays.
     def test_animation_opt_out(self):
@@ -203,7 +203,7 @@ class TerminalTests(unittest.TestCase):
             terminal.show_tool_result(self.record, 1, 1)
             pause.assert_not_called()
             terminal.show_summary(self.result)
-        self.assertGreaterEqual(pause.call_args_list.count(unittest.mock.call(0.35)), 6)
+        self.assertGreaterEqual(pause.call_args_list.count(unittest.mock.call(0.7)), 6)
         self.assertFalse(terminal.summary_reveal)
         self.assertEqual(before, self.result.to_dict())
         self.assertIn("Investigation time:", terminal.stream.getvalue())

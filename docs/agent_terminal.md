@@ -25,11 +25,11 @@ trees, and an aligned final table. `--no-color` disables color without changing
 the layout. Narrow terminals stack the summary fields and wrap long text.
 
 Interactive terminals show a small waiting spinner and reveal the completed
-explanation at 0.08 seconds per word, with a 0.4-second pause between sentences. This is a display
+explanation at 0.14 seconds per word, with a 0.8-second pause between sentences. This is a display
 effect after generation, not token streaming from Groq. It does not change the
 recorded agent latency or token usage. Use `--no-animation` to disable both effects.
 Animations are disabled automatically for redirected output and JSON mode.
-Final evidence and action rows have a 0.35-second reveal interval. This pacing
+Final evidence and action rows have a 0.7-second reveal interval. This pacing
 applies only after the agent returns; the displayed investigation time excludes it.
 
 The display follows four numbered sections: records checked, preliminary finding,
