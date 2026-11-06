@@ -39,7 +39,23 @@ Set one of `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`. The
 `mock` provider is a pipeline stub, never a system under test, every
 measured number must come from a real provider.
 
-## Everything else
+## Agent terminal (work in progress)
+
+The new agent can request approved ERP tools and display a compact colored
+summary. Start with one tool call:
+
+```bash
+python3 -B run_agent.py --ticket TKT-1011
+```
+
+The terminal layout and colors use standard Python with no Rich dependency.
+Colors appear in interactive terminals; `--no-color` keeps the same layout without
+colors. The optional `requirements-ui.txt` provides a CA bundle for Python HTTPS.
+Evidence verification is not implemented yet, so results
+are provisional and escalated for review. See [agent terminal usage](docs/agent_terminal.md)
+for JSON output, budgets, metrics, and limitations. B0/B1 remain unchanged.
+
+## More baseline commands
 
 ```bash
 python run_baseline.py --all --baseline b0 --score            # rule baseline
