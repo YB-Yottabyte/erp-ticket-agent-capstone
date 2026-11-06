@@ -54,13 +54,18 @@ python3 -m pip install -r requirements-ui.txt
   failures at most twice. Provider error bodies and reasoning are not displayed.
 - `ERPAgent`: keeps per-ticket state, counts invalid tool requests against the
   budget, reuses byte-identical repeated requests, and records termination reasons.
+- `FinalAnswerValidator`: checks the final structure and native JSON evidence
+  scalars, reporting field-level errors separately from factual verification.
 - `TerminalUI`: displays progress and the summary separately from agent logic.
 - `AgentCLI`: loads public ticket fields and selects terminal or JSON output.
 
 Only one tool request per response is supported. A parallel-call response or a
 malformed call envelope ends the investigation with escalation. It is not silently
-truncated. A budget of N permits at most N tool attempts and N+1 logical model
-calls; transport retries are separately bounded. Repeated calls still consume the
+truncated. A budget of N permits at most N tool attempts and N+1 investigation
+model calls. If final format validation fails, one additional model call may repair
+the format, so the overall bound is N+2 model calls. Repair has no tools and cannot
+increase the database-call budget; its tokens and latency are included in metrics.
+Transport retries are separately bounded. Repeated calls still consume the
 tool budget even when their observations come from cache. No cross-ticket cache
 or conversation memory is retained.
 
@@ -87,6 +92,30 @@ codes/actions; it does not establish that cited records prove the cause. The UI
 therefore displays **Not verified**, and the controller forces `escalate: true`
 pending the evidence-verification implementation. Do not interpret these outputs
 as full-resolution results or compare them as final research scores yet.
+
+## Final-answer validation and repair
+
+Evidence `observed` values may be strings, finite numbers, booleans, or null,
+matching native ERP data. Lists and objects are rejected. Missing values are not
+invented. Recognized entity capitalization and aliases are normalized; field names,
+IDs, and values are preserved for the future verifier. Confidence remains a finite
+number from 0 to 1, escalation must be a JSON boolean, and codes/actions must come
+from the supported lists. A fenced JSON object is accepted, but arbitrary prose
+and duplicate keys are rejected.
+
+The system prompt includes explicit field types and a compact final-format template.
+The full schema remains available through the validator without adding it to every
+model request. If validation fails, field errors
+and the rejected final-response content are saved in `diagnostics` in the JSON
+result. No hidden reasoning field is recorded. One tools-disabled correction is
+allowed using the same retrieved facts. A second failure escalates and preserves
+the tool trace; the terminal shows field errors and previously retrieved facts,
+rather than reporting that nothing was retrieved. Rejected response text is not
+printed in the terminal. Treat exported diagnostics as untrusted model content.
+
+`final_repair_attempts` counts the bounded correction attempt;
+`final_validation_failures` counts rejected final answers. A format-correct answer
+is not verified evidence and still requires human review.
 
 The existing B0/B1 baseline code is unchanged. No scoring or answer-key accessor is
 added to the agent. The `--db` path is read-only for ticket loading and tool queries.

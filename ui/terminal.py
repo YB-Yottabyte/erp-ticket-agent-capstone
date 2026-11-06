@@ -344,11 +344,16 @@ class TerminalUI:
 
     # Keep the four-column summary and stack its fields on narrow terminals.
     def _summary_table(self, diagnosis, metrics):
+        cause_label = (
+            "Final answer format failed"
+            if metrics["termination_reason"] == "invalid_output"
+            else self.CAUSE_LABELS.get(
+                diagnosis["root_cause_code"], diagnosis["root_cause_code"]
+            )
+        )
         values = [
             diagnosis["ticket_id"],
-            self.CAUSE_LABELS.get(
-                diagnosis["root_cause_code"], diagnosis["root_cause_code"]
-            ),
+            cause_label,
             f"{metrics['tool_calls']}/{metrics['tool_budget']}",
             f"{metrics['elapsed_seconds']:.2f}s",
         ]
@@ -403,7 +408,23 @@ class TerminalUI:
         self._line(f"Diagnosis code: {diagnosis['root_cause_code']}", "muted", indent=2)
         self._line()
         self._reveal(diagnosis.get("root_cause_explanation", ""), indent=2)
-        self._section(3, "Evidence cited by the model")
+        format_failed = metrics["termination_reason"] == "invalid_output"
+        if result.diagnostics:
+            if format_failed:
+                for error in result.diagnostics[-1]["validation_errors"][:3]:
+                    self._line("Format issue: " + error, "yellow", indent=2)
+            elif metrics.get("final_repair_attempts"):
+                self._line(
+                    "Final-answer format corrected in one retry.", "muted", indent=2
+                )
+        self._section(
+            3,
+            (
+                "Retrieved records (final citations unavailable)"
+                if format_failed
+                else "Evidence cited by the model"
+            ),
+        )
         evidence = diagnosis.get("evidence", [])
         if evidence:
             self._tree(
@@ -422,9 +443,36 @@ class TerminalUI:
                     indent=2,
                 )
         else:
-            self._line(
-                "No supporting records cited in the final answer.", "muted", indent=2
-            )
+            if format_failed:
+                successful = [
+                    record
+                    for record in result.trace
+                    if record["observation"].get("status") == "ok"
+                ]
+                self._line(
+                    f"{len(successful)} successful lookup result(s) preserved. These are retrieved facts, not validated final citations.",
+                    "muted",
+                    indent=2,
+                )
+                for record in successful[:3]:
+                    self._line(
+                        self.TOOL_LABELS.get(record["tool_name"], record["tool_name"]),
+                        "bold",
+                        indent=2,
+                    )
+                    self._tree(self._record_facts(record["observation"]))
+                if len(successful) > 3:
+                    self._line(
+                        "Additional lookup results remain in the investigation trace.",
+                        "muted",
+                        indent=2,
+                    )
+            else:
+                self._line(
+                    "No supporting records cited in the final answer.",
+                    "muted",
+                    indent=2,
+                )
         self._line(
             "Not verified · these citations have not been checked against the database.",
             "yellow",

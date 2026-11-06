@@ -187,13 +187,86 @@ class AgentTests(unittest.TestCase):
                 final["message"]["content"] = content
                 final["finish_reason"] = finish
                 result = ERPAgent(
-                    ScriptedClient([self._tool(), final]), self.dispatcher
+                    ScriptedClient([self._tool(), final, final]), self.dispatcher
                 ).run(self.ticket)
                 self.assertTrue(result.diagnosis["escalate"])
                 self.assertIn(
                     result.metrics["termination_reason"],
                     {"invalid_output", "incomplete_model_response"},
                 )
+
+    # Accept numeric ERP values without converting facts or making an extra model call.
+    def test_native_evidence_value(self):
+        final = self._final()
+        data = json.loads(final["message"]["content"])
+        data["evidence"] = [
+            {
+                "entity": "Customer",
+                "id": "C-100",
+                "field": "credit_used",
+                "observed": 25000,
+            }
+        ]
+        final["message"]["content"] = json.dumps(data)
+        result = ERPAgent(ScriptedClient([self._tool(), final]), self.dispatcher).run(
+            self.ticket
+        )
+        self.assertEqual(result.diagnosis["evidence"][0]["observed"], 25000)
+        self.assertEqual(result.metrics["final_repair_attempts"], 0)
+        self.assertEqual(result.metrics["model_calls"], 2)
+
+    # Repair one malformed final answer without granting more database tool calls.
+    def test_final_format_repair(self):
+        bad = self._final()
+        data = json.loads(bad["message"]["content"])
+        del data["proposed_fix"]["target"]
+        bad["message"]["content"] = json.dumps(data)
+        client = ScriptedClient([self._tool(), bad, self._final()])
+        result = ERPAgent(client, self.dispatcher).run(self.ticket)
+        self.assertEqual(result.metrics["final_repair_attempts"], 1)
+        self.assertEqual(result.metrics["final_validation_failures"], 1)
+        self.assertEqual(result.metrics["model_calls"], 3)
+        self.assertEqual(result.metrics["tool_calls"], 1)
+        self.assertEqual(
+            result.metrics["reported_tokens"], {"input_tokens": 50, "output_tokens": 25}
+        )
+        self.assertIsNone(client.requests[-1]["tools"])
+        self.assertIn(
+            "proposed_fix.target", result.diagnostics[0]["validation_errors"][0]
+        )
+        self.assertEqual(
+            result.diagnostics[0]["final_response"], bad["message"]["content"]
+        )
+
+    # Stop after one failed repair and show the exact field error with retained records.
+    def test_repair_failure_preserves_records(self):
+        bad = self._final()
+        data = json.loads(bad["message"]["content"])
+        data["confidence"] = "high"
+        bad["message"]["content"] = json.dumps(data)
+        result = ERPAgent(
+            ScriptedClient([self._tool(), bad, bad]), self.dispatcher
+        ).run(self.ticket)
+        self.assertEqual(result.metrics["termination_reason"], "invalid_output")
+        self.assertEqual(result.metrics["final_validation_failures"], 2)
+        self.assertEqual(result.metrics["model_calls"], 3)
+        self.assertEqual(result.trace[0]["observation"]["status"], "ok")
+        stream = StringIO()
+        TerminalUI(stream).show_summary(result)
+        self.assertIn("confidence", stream.getvalue())
+        self.assertIn("successful lookup", stream.getvalue())
+        self.assertIn("INV-0009", stream.getvalue())
+        self.assertNotIn("No supporting records", stream.getvalue())
+
+    # Reject new tool requests during the format-only repair even with budget remaining.
+    def test_repair_cannot_extend_investigation(self):
+        bad = self._final()
+        bad["message"]["content"] = "not json"
+        client = ScriptedClient([self._tool(), bad, self._tool("call_2")])
+        result = ERPAgent(client, self.dispatcher, 8).run(self.ticket)
+        self.assertEqual(result.metrics["termination_reason"], "invalid_tool_response")
+        self.assertEqual(result.metrics["tool_calls"], 1)
+        self.assertIsNone(client.requests[-1]["tools"])
 
     # Keep unknown token usage distinct from a real zero-token measurement.
     def test_missing_usage(self):
