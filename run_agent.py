@@ -95,9 +95,8 @@ class AgentCLI:
                 result.diagnosis,
                 database,
             )
-
+            # Store the verification results in the diagnosis for later review.
             result.diagnosis["verification"] = verification
-            result.diagnosis["evidence_status"] = verification["status"]
 
             # Keep unsupported answers escalated for review.
             result.diagnosis["escalate"] = (
