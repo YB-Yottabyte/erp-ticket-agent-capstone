@@ -100,12 +100,48 @@ class ERPAgent:
             result.get("evidence"), list
         ):
             raise ValueError("Invalid escalation or evidence")
+                # Accept text, numbers, and null as observed values.
+        # Convert them to the string format used by our verifier.
         for evidence in result["evidence"]:
-            if not isinstance(evidence, dict) or any(
-                not isinstance(evidence.get(key), str)
-                for key in ("entity", "id", "field", "observed")
-            ):
+            if not isinstance(evidence, dict):
                 raise ValueError("Invalid evidence item")
+
+            for key in ("entity", "id", "field"):
+                if not isinstance(evidence.get(key), str):
+                    raise ValueError(f"Invalid evidence {key}")
+
+            if "observed" not in evidence:
+                raise ValueError("Missing observed value")
+
+            observed = evidence["observed"]
+
+            if observed is None:
+                evidence["observed"] = "null"
+
+            elif type(observed) in (int, float):
+                if not math.isfinite(observed):
+                    raise ValueError("Observed number must be finite")
+
+                evidence["observed"] = str(observed)
+
+            elif not isinstance(observed, str):
+                raise ValueError("Unsupported observed value type")
+        # Reject blank explanation, target, and citation identifiers.
+        if not result["root_cause_explanation"].strip():
+            raise ValueError("Explanation cannot be empty")
+
+        if not fix["target"].strip():
+            raise ValueError("Fix target cannot be empty")
+
+        for item in result["evidence"]:
+            for key in ("entity", "id", "field"):
+                if not item[key].strip():
+                    raise ValueError(f"Evidence {key} cannot be empty")
+
+        # Empty observed text is allowed when the database value is "".
+        if result["root_cause_code"] != "UNKNOWN" and not result["evidence"]:
+            raise ValueError("A known issue needs evidence")
+        
         fields = (
             "root_cause_code",
             "root_cause_explanation",
@@ -187,7 +223,14 @@ class ERPAgent:
                         reason = "no_investigation"
                     elif final_turn:
                         reason = "budget_limit"
-                except (ValueError, TypeError, RecursionError):
+                except (ValueError, TypeError, RecursionError) as error:
+                    # Show why the model's final answer was rejected.
+                    import sys
+                    print(f"Validation error: {error}", file=sys.stderr)
+                    print(
+                        f"Model answer: {message.get('content')}",
+                        file=sys.stderr,
+                    )
                     diagnosis = self._escalation(
                         ticket, "The model did not return a valid final diagnosis"
                     )
