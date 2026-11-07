@@ -12,7 +12,7 @@ from run_baseline import parse_ticket_file
 from tools.database import ERPDatabase
 from tools.dispatcher import ToolDispatcher, ToolRegistry
 from ui.terminal import TerminalUI
-
+from agents.evidence import verify_diagnosis
 
 class AgentCLI:
     # Define separate terminal and JSON modes without changing baseline commands.
@@ -87,6 +87,22 @@ class AgentCLI:
                 result = agent.run(
                     ticket, on_tool=terminal.show_tool_result if terminal else None
                 )
+
+            # Evidence Verification
+            # Verify before displaying or saving the diagnosis.
+            verification = verify_diagnosis(
+                ticket,
+                result.diagnosis,
+                database,
+            )
+            # Store the verification results in the diagnosis for later review.
+            result.diagnosis["verification"] = verification
+
+            # Keep unsupported answers escalated for review.
+            result.diagnosis["escalate"] = (
+                verification["status"] != "passed"
+            )
+                        
             serialized = json.dumps(result.to_dict(), indent=2, allow_nan=False)
             if arguments.out:
                 with open(arguments.out, "x", encoding="utf-8") as output:
