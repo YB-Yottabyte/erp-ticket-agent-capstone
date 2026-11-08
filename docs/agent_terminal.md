@@ -1,5 +1,12 @@
 # Agent cycle and terminal summary
 
+**Current status:** The investigation loop has been removed for the assigned team
+member to implement. `ERPAgent.run()` raises `NotImplementedError`; the CLI reports
+`not_implemented` (JSON mode) or a pending message and exits with status 2 before
+opening the database or model client. The UI, tools, and evidence verifier remain.
+The instructions below describe the previous implementation and its intended
+integration, rather than functionality currently available from the CLI.
+
 The first version defaults to **one tool call**, followed by a final model reply.
 This makes the initial model-tool-model cycle easy to inspect. A budget of up to
 eight calls is also supported for sequential investigations. It is not a complete

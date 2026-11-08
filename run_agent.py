@@ -61,6 +61,16 @@ class AgentCLI:
     # Run one investigation and keep terminal rendering separate from structured data.
     def run(self):
         arguments = self.parser.parse_args()
+        # Restore investigation startup when the assigned agent loop is implemented.
+        message = "Agent loop is pending implementation; database tools and evidence verification remain available"
+        if arguments.json:
+            print(json.dumps({"status": "not_implemented", "message": message}))
+        else:
+            print(message, file=sys.stderr)
+        return 2
+
+    # Preserve the terminal and verifier integration for the future agent loop.
+    def _run_investigation(self, arguments):
         try:
             if arguments.out and Path(arguments.out).exists():
                 raise ValueError("Output file already exists; choose a new path")
