@@ -1,18 +1,7 @@
 import argparse
-from contextlib import nullcontext
 import json
-from pathlib import Path
-import sqlite3
 import sys
 
-from agents.erp_agent import ERPAgent
-from agents.groq_client import GroqToolClient
-from agents.llm import LLMError
-from run_baseline import parse_ticket_file
-from tools.database import ERPDatabase
-from tools.dispatcher import ToolDispatcher, ToolRegistry
-from ui.terminal import TerminalUI
-from agents.evidence import verify_diagnosis
 
 class AgentCLI:
     # Define separate terminal and JSON modes without changing baseline commands.
@@ -42,23 +31,7 @@ class AgentCLI:
             help="Create a new JSON result file; existing files are not overwritten",
         )
 
-    # Load only public ticket columns through a read-only database connection.
-    def _load_ticket(self, arguments, database):
-        if arguments.input:
-            return parse_ticket_file(arguments.input)
-        connection = database.connect()
-        try:
-            row = connection.execute(
-                "SELECT id, subject, body, reported_by, created_at, referenced_doc FROM tickets WHERE id = ?",
-                (arguments.ticket,),
-            ).fetchone()
-        finally:
-            connection.close()
-        if row is None:
-            raise ValueError("Ticket was not found")
-        return dict(row)
-
-    # Run one investigation and keep terminal rendering separate from structured data.
+    # Report the pending agent loop without opening the database or model client.
     def run(self):
         arguments = self.parser.parse_args()
         # Restore investigation startup when the assigned agent loop is implemented.
@@ -68,86 +41,6 @@ class AgentCLI:
         else:
             print(message, file=sys.stderr)
         return 2
-
-    # Preserve the terminal and verifier integration for the future agent loop.
-    def _run_investigation(self, arguments):
-        try:
-            if arguments.out and Path(arguments.out).exists():
-                raise ValueError("Output file already exists; choose a new path")
-            database = ERPDatabase(arguments.db)
-            ticket = self._load_ticket(arguments, database)
-            client = GroqToolClient(model=arguments.model)
-            dispatcher = ToolDispatcher(ToolRegistry(database))
-            agent = ERPAgent(client, dispatcher, arguments.max_tool_calls)
-            terminal = (
-                None
-                if arguments.json
-                else TerminalUI(
-                    color=not arguments.no_color, animate=not arguments.no_animation
-                )
-            )
-            if terminal:
-                terminal.show_header(
-                    ticket["id"],
-                    client.model,
-                    arguments.max_tool_calls,
-                    subject=ticket.get("subject"),
-                )
-            with terminal.waiting() if terminal else nullcontext():
-                result = agent.run(
-                    ticket, on_tool=terminal.show_tool_result if terminal else None
-                )
-
-            # Evidence Verification
-            # Verify before displaying or saving the diagnosis.
-            verification = verify_diagnosis(
-                ticket,
-                result.diagnosis,
-                database,
-            )
-            # Store the verification results in the diagnosis for later review.
-            result.diagnosis["verification"] = verification
-
-            # Keep unsupported answers escalated for review.
-            result.diagnosis["escalate"] = (
-                verification["status"] != "passed"
-            )
-                        
-            serialized = json.dumps(result.to_dict(), indent=2, allow_nan=False)
-            if arguments.out:
-                with open(arguments.out, "x", encoding="utf-8") as output:
-                    output.write(serialized + "\n")
-            if arguments.json:
-                print(serialized)
-            else:
-                terminal.show_summary(result)
-            return (
-                1
-                if result.metrics["termination_reason"]
-                in {
-                    "provider_error",
-                    "invalid_tool_response",
-                    "invalid_output",
-                    "incomplete_model_response",
-                }
-                else 0
-            )
-        except (LLMError, OSError, sqlite3.Error, ValueError):
-            if arguments.json:
-                print(
-                    json.dumps(
-                        {
-                            "status": "error",
-                            "message": "Agent setup or output failed; check the database, ticket, API key, and output path",
-                        }
-                    )
-                )
-            else:
-                print(
-                    "Agent setup or output failed. Check the database, ticket, API key, and output path.",
-                    file=sys.stderr,
-                )
-            return 1
 
 
 if __name__ == "__main__":

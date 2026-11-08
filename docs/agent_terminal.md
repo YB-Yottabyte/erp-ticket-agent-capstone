@@ -1,7 +1,7 @@
 # Agent cycle and terminal summary
 
 **Current status:** The investigation loop has been removed for the assigned team
-member to implement. `ERPAgent.run()` raises `NotImplementedError`; the CLI reports
+member to implement. `agents/erp_agent.py` has been deleted; the CLI reports
 `not_implemented` (JSON mode) or a pending message and exits with status 2 before
 opening the database or model client. The UI, tools, and evidence verifier remain.
 The instructions below describe the previous implementation and its intended
