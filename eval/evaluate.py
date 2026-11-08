@@ -18,6 +18,16 @@ def _token_total(usage):
         return None
     return input_tokens + output_tokens
 
+def _mean(values):
+    values = [
+        value
+        for value in values
+        if isinstance(value, (int, float))
+    ]
+    if not values:
+        return None
+    return round(sum(values) / len(values), 3)
+
 def evaluate_baseline(db_path,baseline,provider="mock",model=None,limit=None):
     tickets = load_tickets(db_path, limit=limit)
     connection = sqlite3.connect(db_path)
@@ -63,6 +73,66 @@ def evaluate_baseline(db_path,baseline,provider="mock",model=None,limit=None):
         connection.close()
     return rows
 
+def aggregate(rows):
+    if not rows:
+        return {}
+    number_of_cases = len(rows)
+    def percentage(condition):
+        count = sum(
+            1
+            for row in rows
+            if condition(row)
+        )
+        return round(
+            (count / number_of_cases) * 100,
+            1,
+        )
+    summary = {
+        "total_cases": number_of_cases,
+        "root_cause_accuracy_pct": percentage(
+            lambda row: row["code_ok"]
+        ),
+        "full_resolution_pct": percentage(
+            lambda row: row["resolved"]
+        ),
+        "action_accuracy_pct": percentage(
+            lambda row: row["action_ok"]
+        ),
+        "evidence_valid_pct": percentage(
+            lambda row: row["evidence_valid"]
+        ),
+        "evidence_relevant_pct": percentage(
+            lambda row: row["evidence_relevant"]
+        ),
+        "hallucinated_evidence_pct": percentage(
+            lambda row: row["hallucinated_evidence"]
+        ),
+        "escalation_rate_pct": percentage(
+            lambda row: bool(row["escalated"])
+        ),
+        "avg_latency_seconds": _mean(
+            [
+                row.get("latency_seconds")
+                for row in rows
+            ]
+        ),
+        "avg_total_tokens": _mean(
+            [
+                row.get("total_tokens")
+                for row in rows
+            ]
+        ),
+    }
+    return summary
+
+def print_summary(system, summary):
+    print()
+    print(f"{system.upper()} Evaluation Summary")
+    print("-" * 50)
+
+    for metric, value in summary.items():
+        print(f"{metric:32} {value}")
+        
 def main():
     parser = argparse.ArgumentParser(description="Evaluate ERP ticket baselines.")
     parser.add_argument("--db",default="data/erp.db")
@@ -93,6 +163,8 @@ def main():
                     f"predicted={row['predicted_code']} "
                     f"correct={row['code_ok']}"
                 )
+            summary = aggregate(rows)
+            print_summary(system,summary)
 
     except LLMError as error:
         raise SystemExit(
