@@ -42,16 +42,11 @@ measured number must come from a real provider.
 ## Agent terminal (work in progress)
 
 The investigation loop has been removed so the assigned team member can implement
-it. `agents/erp_agent.py` has been deleted. The command below reports that implementation
-is pending and exits with status 2 without calling the model:
-
-```bash
-python3 -B run_agent.py --ticket TKT-1011
-```
+it. The agent implementation, terminal entry point, and associated agent tests have
+been deleted. There is currently no agent command to run.
 
 The terminal layout and colors use standard Python with no Rich dependency.
-Colors appear in interactive terminals; `--no-color` keeps the same layout without
-colors. The optional `requirements-ui.txt` provides a CA bundle for Python HTTPS.
+The optional `requirements-ui.txt` provides a CA bundle for Python HTTPS.
 Database tools, the dispatcher, evidence verification, and terminal rendering remain
 available for the future loop to use. See
 [agent terminal usage](docs/agent_terminal.md) for the previous design.
