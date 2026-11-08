@@ -1,21 +1,25 @@
 # Agent cycle and terminal summary
 
+**Current status:** The investigation loop has been removed for the assigned team
+member to implement. The agent implementation, terminal entry point, and associated
+agent tests have been deleted. There is no agent CLI to run.
+The UI, tools, and evidence verifier remain.
+The instructions below describe the previous implementation and its intended
+integration, rather than functionality currently available from the CLI.
+
 The first version defaults to **one tool call**, followed by a final model reply.
 This makes the initial model-tool-model cycle easy to inspect. A budget of up to
 eight calls is also supported for sequential investigations. It is not a complete
 evaluated diagnosis system yet: factual evidence verification remains a separate
 task, and all current diagnoses require human review.
 
-## Run
+## Previous command behavior (archived)
 
 Configure `GROQ_API_KEY` in your private `.env`. The existing `GROQ_MODEL` setting
 is reused. Neither keys nor `.env` belong in version control.
 
-```bash
-python3 -B run_agent.py --ticket TKT-1011
-python3 -B run_agent.py --input examples/test1.txt --max-tool-calls 8
-python3 -B run_agent.py --ticket TKT-1011 --json --out outputs/agent-first-run.json
-```
+The previous entry point accepted a ticket ID or ticket file, a tool-call budget,
+and optional JSON output. It is no longer included in the repository.
 
 The output directory must already exist, and existing output files are never
 overwritten. The JSON mode writes a machine-readable object to stdout with no
@@ -93,9 +97,8 @@ added to the agent. The `--db` path is read-only for ticket loading and tool que
 
 ## Offline checks
 
-```bash
-python3 -B -m unittest discover -s tests -v
-```
+The previous automated test suite has been removed. Add new checks alongside the
+team's agent-loop implementation before reporting evaluation results.
 
 Protocol reference: [Groq local tool calling](https://console.groq.com/docs/tool-use/local-tool-calling).
 

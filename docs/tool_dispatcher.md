@@ -49,15 +49,8 @@ type if applicable, and local elapsed time. Invalid arguments are not retained.
 Timing covers parsing, validation, and local execution, not model latency or API
 retries. An `ok` lookup is not a correct diagnosis. Rejected calls must still
 count toward the future eight-call budget, which this layer does not enforce.
-No agent accuracy or model integration is established by these unit tests.
-
-Run the offline tests from the repository root:
-
-```bash
-python3 -B -m unittest discover -s tests -v
-```
-
-The tests create a temporary deterministic database from the repository schema.
-They do not use API keys or modify the developer's generated ERP database.
+No agent accuracy or model integration is established by this layer.
+The previous automated test suite has been removed; new tests will need to be
+added when the team resumes testing.
 
 Protocol reference: [Groq local tool calling](https://console.groq.com/docs/tool-use/local-tool-calling).

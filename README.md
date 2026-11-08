@@ -41,19 +41,16 @@ measured number must come from a real provider.
 
 ## Agent terminal (work in progress)
 
-The new agent can request approved ERP tools and display a compact colored
-summary. Start with one tool call:
-
-```bash
-python3 -B run_agent.py --ticket TKT-1011
-```
+The investigation loop has been removed so the assigned team member can implement
+it. The agent implementation, terminal entry point, and associated agent tests have
+been deleted. There is currently no agent command to run.
 
 The terminal layout and colors use standard Python with no Rich dependency.
-Colors appear in interactive terminals; `--no-color` keeps the same layout without
-colors. The optional `requirements-ui.txt` provides a CA bundle for Python HTTPS.
-Evidence verification is not implemented yet, so results
-are provisional and escalated for review. See [agent terminal usage](docs/agent_terminal.md)
-for JSON output, budgets, metrics, and limitations. B0/B1 remain unchanged.
+The optional `requirements-ui.txt` provides a CA bundle for Python HTTPS.
+Database tools, the dispatcher, evidence verification, and terminal rendering remain
+available for the future loop to use. See
+[agent terminal usage](docs/agent_terminal.md) for the previous design.
+B0/B1 remain unchanged.
 
 ## More baseline commands
 
