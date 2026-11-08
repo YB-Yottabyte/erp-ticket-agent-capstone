@@ -2,6 +2,8 @@ import argparse
 import os
 import sqlite3
 import time
+import json
+from pathlib import Path
 from agents.baseline import run_b0, run_b1
 from agents.llm import LLMError
 from eval.score import fault_for, score_one
@@ -140,13 +142,16 @@ def main():
     parser.add_argument( "--provider",default="mock")
     parser.add_argument("--model",default=None)
     parser.add_argument("--limit",type=int,default=None,)
+    parser.add_argument("--out",default=None,
+    help="Optional JSON file for saving evaluation results.",
+    )
     args = parser.parse_args()
 
     if not os.path.exists(args.db):
         raise SystemExit(
             f"Database not found: {args.db}"
         )
-
+    all_results = {}
     try:
         for system in args.systems:
             rows = evaluate_baseline(args.db,system,provider=args.provider,model=args.model,limit=args.limit)
@@ -165,11 +170,28 @@ def main():
                 )
             summary = aggregate(rows)
             print_summary(system,summary)
+            all_results[system] = {"summary": summary,"rows": rows}
 
     except LLMError as error:
         raise SystemExit(
             f"Model provider failed: {error}"
         ) from error
+    if args.out:
+        output_path = Path(args.out)
+
+        output_path.parent.mkdir(parents=True,exist_ok=True)
+        output_path.write_text(
+            json.dumps(
+                all_results,
+                indent=2,
+                allow_nan=False,
+            ),
+            encoding="utf-8",
+        )
+
+        print(
+            f"\nResults written to {output_path}"
+        )
 
 
 if __name__ == "__main__":
