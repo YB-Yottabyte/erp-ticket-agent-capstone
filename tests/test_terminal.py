@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from agents.erp_agent import AgentResult
+from types import SimpleNamespace
 from ui.terminal import TerminalUI
 
 
@@ -17,7 +17,7 @@ class TerminalStream(StringIO):
 class TerminalTests(unittest.TestCase):
     # Use explicit display fixtures rather than making model calls for UI tests.
     def setUp(self):
-        self.result = AgentResult(
+        self.result = SimpleNamespace(
             diagnosis={
                 "ticket_id": "TKT-1011",
                 "root_cause_code": "CREDIT_LIMIT_STALE_SYNC",
@@ -144,14 +144,14 @@ class TerminalTests(unittest.TestCase):
 
     # Sanitize terminal controls and avoid modifying the research result during rendering.
     def test_controls_and_result_preservation(self):
-        before = self.result.to_dict()
+        before = deepcopy(vars(self.result))
         stream = StringIO()
         terminal = TerminalUI(stream, color=False)
         terminal.show_header("\033[31m[bold]ticket\n", "model", 1)
         terminal.show_summary(self.result)
         self.assertNotIn("\033", stream.getvalue())
         self.assertIn("[bold]ticket", stream.getvalue())
-        self.assertEqual(before, self.result.to_dict())
+        self.assertEqual(before, vars(self.result))
 
     # Reveal words and pause between sentences only for interactive output.
     def test_sentence_reveal(self):
@@ -198,14 +198,14 @@ class TerminalTests(unittest.TestCase):
     def test_summary_row_pacing(self):
         with patch.dict(os.environ, {"TERM": "xterm-256color"}, clear=True):
             terminal = TerminalUI(TerminalStream(), color=False)
-        before = self.result.to_dict()
+        before = deepcopy(vars(self.result))
         with patch("ui.terminal.time.sleep") as pause:
             terminal.show_tool_result(self.record, 1, 1)
             pause.assert_not_called()
             terminal.show_summary(self.result)
         self.assertGreaterEqual(pause.call_args_list.count(unittest.mock.call(0.7)), 6)
         self.assertFalse(terminal.summary_reveal)
-        self.assertEqual(before, self.result.to_dict())
+        self.assertEqual(before, vars(self.result))
         self.assertIn("Investigation time:", terminal.stream.getvalue())
 
 
