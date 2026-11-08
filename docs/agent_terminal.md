@@ -97,9 +97,8 @@ added to the agent. The `--db` path is read-only for ticket loading and tool que
 
 ## Offline checks
 
-```bash
-python3 -B -m unittest discover -s tests -v
-```
+The previous automated test suite has been removed. Add new checks alongside the
+team's agent-loop implementation before reporting evaluation results.
 
 Protocol reference: [Groq local tool calling](https://console.groq.com/docs/tool-use/local-tool-calling).
 
