@@ -89,6 +89,15 @@ class TestDiagnosisVerifier(unittest.TestCase):
                 );
             """)
 
+            # Default blockers used by the customer-hold tests.
+            connection.execute(
+                "UPDATE sales_orders SET block_reason = ? WHERE id = ?",
+                ("APPROVAL_CHECK_FAILED", "SO-1"),
+            )
+            connection.execute(
+                "UPDATE invoices SET blocked_reason = ? WHERE id = ?",
+                ("CREDIT_CHECK_FAILED", "INV-1"),
+            )
             connection.commit()
         finally:
             connection.close()
@@ -99,6 +108,23 @@ class TestDiagnosisVerifier(unittest.TestCase):
             "referenced_doc": "INV-1",
             "created_at": "2026-09-04",
         }
+
+    def set_blockers(self, order_reason, invoice_reason):
+        """Prepare blocker values in this test's temporary database."""
+        db_path = Path(self.temp_dir.name) / "erp.db"
+        connection = sqlite3.connect(db_path)
+        try:
+            connection.execute(
+                "UPDATE sales_orders SET block_reason = ? WHERE id = ?",
+                (order_reason, "SO-1"),
+            )
+            connection.execute(
+                "UPDATE invoices SET blocked_reason = ? WHERE id = ?",
+                (invoice_reason, "INV-1"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
 
     def claim(self, entity, record_id, field, observed):
         """Build one citation in the agent's output format."""
@@ -164,6 +190,7 @@ class TestDiagnosisVerifier(unittest.TestCase):
         self.check(self.hold_diagnosis(), "passed")
 
     def test_missing_tax_id_passes(self):
+        self.set_blockers(None, "POSTING_VALIDATION_FAILED")
         diagnosis = self.diagnosis(
             "MISSING_TAX_ID",
             "UPDATE_FIELD",
@@ -173,6 +200,7 @@ class TestDiagnosisVerifier(unittest.TestCase):
         self.check(diagnosis, "passed")
 
     def test_expired_price_list_passes(self):
+        self.set_blockers("PRICING_CHECK_FAILED", None)
         diagnosis = self.diagnosis(
             "STALE_PRICE_LIST",
             "REPRICE_ORDER",
@@ -182,6 +210,7 @@ class TestDiagnosisVerifier(unittest.TestCase):
         self.check(diagnosis, "passed")
 
     def test_incomplete_delivery_passes(self):
+        self.set_blockers(None, "DELIVERY_CHECK_FAILED")
         diagnosis = self.diagnosis(
             "INCOMPLETE_DELIVERY_BLOCKS_INVOICE",
             "COMPLETE_DELIVERY",
@@ -194,6 +223,7 @@ class TestDiagnosisVerifier(unittest.TestCase):
         self.check(diagnosis, "passed")
 
     def test_failed_credit_sync_passes(self):
+        self.set_blockers(None, "CREDIT_CHECK_FAILED")
         evidence = [
             self.claim("Customer", "C-1", "credit_limit", "1000"),
             self.claim("Customer", "C-1", "credit_used", "1000"),
@@ -212,6 +242,7 @@ class TestDiagnosisVerifier(unittest.TestCase):
         self.check(diagnosis, "passed")
 
     def test_failed_price_sync_passes(self):
+        self.set_blockers("PRICING_CHECK_FAILED", None)
         evidence = self.price_evidence()
         evidence += self.job_evidence("JR-2", "price_sync")
 
@@ -282,11 +313,92 @@ class TestDiagnosisVerifier(unittest.TestCase):
         self.check(diagnosis, "insufficient")
 
     def test_failed_job_alone_is_not_enough(self):
+        self.set_blockers("PRICING_CHECK_FAILED", None)
         diagnosis = self.diagnosis(
             "PRICE_SYNC_JOB_FAILED",
             "RERUN_JOB",
             "price_sync",
             self.job_evidence("JR-2", "price_sync"),
+        )
+        self.check(diagnosis, "failed")
+
+
+    def test_conflicting_transaction_blocker_fails(self):
+        """A customer hold must not explain a different recorded blocker."""
+        self.set_blockers("PRICING_CHECK_FAILED", None)
+        result = verify_diagnosis(
+            self.ticket, self.hold_diagnosis(), self.database
+        )
+        self.assertEqual(result["status"], "failed", result)
+        self.assertTrue(
+            any("Claimed issue expects" in error for error in result["errors"]),
+            result,
+        )
+
+    def test_unblocked_order_fails(self):
+        """An account hold alone must not pass for an unblocked order."""
+        db_path = Path(self.temp_dir.name) / "erp.db"
+        connection = sqlite3.connect(db_path)
+        try:
+            connection.execute(
+                "UPDATE sales_orders SET status = ? WHERE id = ?",
+                ("OPEN", "SO-1"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        result = verify_diagnosis(
+            self.ticket, self.hold_diagnosis(), self.database
+        )
+        self.assertEqual(result["status"], "failed", result)
+        self.assertIn("Transaction is not marked BLOCKED", result["errors"])
+
+    def test_price_sync_can_fail_with_valid_price_list(self):
+        """A price-refresh failure does not require price-list expiry."""
+        self.set_blockers("PRICING_CHECK_FAILED", None)
+        db_path = Path(self.temp_dir.name) / "erp.db"
+        connection = sqlite3.connect(db_path)
+        try:
+            connection.execute(
+                "UPDATE price_lists SET valid_to = ? WHERE id = ?",
+                ("2026-09-20", "PL-1"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        evidence = [
+            self.claim("SalesOrder", "SO-1", "price_list_id", "PL-1")
+        ]
+        evidence += self.job_evidence("JR-2", "price_sync")
+        diagnosis = self.diagnosis(
+            "PRICE_SYNC_JOB_FAILED", "RERUN_JOB", "price_sync", evidence
+        )
+        self.check(diagnosis, "passed")
+
+    def test_valid_price_list_fails_expired_list_diagnosis(self):
+        """Correctly observed dates must still establish actual expiry."""
+        self.set_blockers("PRICING_CHECK_FAILED", None)
+        db_path = Path(self.temp_dir.name) / "erp.db"
+        connection = sqlite3.connect(db_path)
+        try:
+            connection.execute(
+                "UPDATE price_lists SET valid_to = ? WHERE id = ?",
+                ("2026-09-20", "PL-1"),
+            )
+            connection.commit()
+        finally:
+            connection.close()
+
+        diagnosis = self.diagnosis(
+            "STALE_PRICE_LIST",
+            "REPRICE_ORDER",
+            "SO-1",
+            [
+                self.claim("SalesOrder", "SO-1", "price_list_id", "PL-1"),
+                self.claim("PriceList", "PL-1", "valid_to", "2026-09-20"),
+            ],
         )
         self.check(diagnosis, "failed")
 
