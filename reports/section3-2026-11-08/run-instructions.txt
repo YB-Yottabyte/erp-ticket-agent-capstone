@@ -1,0 +1,14 @@
+Reproduction and evidence
+
+The run started from main commit a1afdbe, with the new evaluation harness on branch run-preliminary-evaluation. The implementation fingerprint is 22255befd1b7d5c09aafc525de46d922159239f23b741a0a9c222fb40e050d9b. The frozen manifest fingerprint is 108d390242e64d20fbac45797862cb8e1df06bea0289bee3f1b40266f474540b. These fingerprints and the complete per-case audit identify the exact experiment; a branch name alone is not a submission commit.
+
+Configure your private VOYAGER_API_KEY and required network access. From the repository root, create a NEW output directory:
+
+python3 -B -m eval.datasets --out outputs/reproduce-section3/datasets
+python3 -B -m eval.experiment --manifest outputs/reproduce-section3/datasets/manifest.json --out outputs/reproduce-section3/run --provider voyager --model qwen38-27b --workers 2
+
+The second command resumes an interrupted run only when its configuration matches. It saves every completed case, full diagnosis/tool audit, and summary. The generator does not replace data/erp.db. A fresh live run can produce different results even with temperature 0.
+
+Files supplied with this report: summary.json, target-checks.json, manifest.json, settings.json, and results.jsonl.gz. The archive contains all 180 result records. Database files are not committed; regenerate them using the frozen seeds and generator. The report's performance conclusions use measured results, while the remaining experiments above are explicitly pending.
+
+Cost note: zero API-fee fields in the raw audit assume no charge to the user through this access. They are not measured billing or model-serving cost.

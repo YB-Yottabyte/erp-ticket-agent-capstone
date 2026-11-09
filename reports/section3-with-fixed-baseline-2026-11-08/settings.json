@@ -1,0 +1,28 @@
+{
+  "original_phase": {
+    "provider": "voyager",
+    "model": "qwen38-27b",
+    "temperature": 0,
+    "reasoning_effort": "none",
+    "max_tool_calls": 8,
+    "workers": 2,
+    "implementation_sha256": "22255befd1b7d5c09aafc525de46d922159239f23b741a0a9c222fb40e050d9b",
+    "manifest_sha256": "108d390242e64d20fbac45797862cb8e1df06bea0289bee3f1b40266f474540b"
+  },
+  "fixed_baseline_phase": {
+    "provider": "voyager",
+    "model": "qwen38-27b",
+    "temperature": 0,
+    "reasoning_effort": "none",
+    "max_tool_calls": 8,
+    "workers": 2,
+    "systems": [
+      "fixed"
+    ],
+    "implementation_sha256": "b7a5b440a115e04067dd47f4f4d78b66a36e425abd7806c3b4ce96f39954c41a",
+    "evaluation_sha256": "5ce5cad374dd7de1353a5ba26e93afd4479564acdd7b2f7ee18c0dbda1cb09ee",
+    "manifest_sha256": "108d390242e64d20fbac45797862cb8e1df06bea0289bee3f1b40266f474540b"
+  },
+  "original_sources_unchanged": true,
+  "note": "Two sequential phases; previous results were not rerun or relabeled."
+}

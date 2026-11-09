@@ -1,0 +1,10 @@
+{
+  "provider": "voyager",
+  "model": "qwen38-27b",
+  "temperature": 0,
+  "reasoning_effort": "none",
+  "max_tool_calls": 8,
+  "workers": 2,
+  "implementation_sha256": "22255befd1b7d5c09aafc525de46d922159239f23b741a0a9c222fb40e050d9b",
+  "manifest_sha256": "108d390242e64d20fbac45797862cb8e1df06bea0289bee3f1b40266f474540b"
+}

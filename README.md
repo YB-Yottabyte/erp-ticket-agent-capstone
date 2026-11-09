@@ -1,173 +1,301 @@
-# Order-to-Cash Ticket Diagnosis Agent
+<h1 align="center">ERP Ticket Agent</h1>
 
-Diagnose why an ERP transaction is stuck, given only a vague support ticket.
+<p align="center">
+  <strong>Investigate blocked ERP transactions using read-only database tools and verified evidence.</strong>
+</p>
 
-Every ticket is generated from a fault deliberately injected into a synthetic
-ERP, so the correct answer is known before anything runs and scoring is fully
-automatic. No real data is used anywhere.
+The agent reads a support ticket, chooses which ERP records to check, and returns
+an explanation, supporting evidence, and a recommended action. It escalates cases
+when it cannot verify the diagnosis. It does not change ERP records.
 
-## Baselines
+This guide uses **ASU Voyager with `qwen38-27b`**. All examples use synthetic data.
 
-Two baselines are included: **B0** (regex rules, no model, no database) and
-**B1** (a single LLM call, ticket text only, no database access). Neither can
-query the ERP, and is what a future tool-using agent will
-have to improve on.
+## Quickstart
 
-## Requirements
+### 1. Clone the repository
 
-Python 3.9+ (developed and tested on 3.13). **No third-party packages** :
-standard library only, so there is nothing to `pip install`.
-
-## Run it
+Requirements: Git, Python **3.9+** (tested on 3.13), and a Voyager API key.
+The commands below use macOS or Linux with Bash/Zsh.
 
 ```bash
-python -m erpsim.build_world --seed 42 --out data/erp.db
-python run_baseline.py --input examples/test1.txt --score
+git clone https://github.com/YB-Yottabyte/erp-ticket-agent-capstone.git
+cd erp-ticket-agent-capstone
+python3 --version
 ```
 
-That works offline with no API key: the default `--provider mock` is a
-deterministic stub that exercises the whole pipeline.
+If you already cloned the repository, open its folder instead.
 
-## Run it against a real model
+### 2. Create a Python environment
 
 ```bash
-cp .env.example .env      # then paste in one key
-python run_baseline.py --input examples/test1.txt --provider gemini --score
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements-ui.txt
 ```
 
-Set one of `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`. The
-`mock` provider is a pipeline stub, never a system under test, every
-measured number must come from a real provider.
+The controller, SQLite tools, and evaluation code use Python's standard library.
+`requirements-ui.txt` installs `certifi`, which provides trusted HTTPS certificates
+when the Python installation has no certificate roots.
 
-## Voyager provider
+### 3. Get your ASU Voyager API key
 
-Copy `.env.example` to `.env` if you do not already have a local `.env`.
-Add the following settings to `.env`, replacing the placeholder locally:
+1. Connect to the ASU network or ASU VPN to open the
+   [Voyager portal](https://voyager.rc.asu.edu/).
+2. Sign in, open your profile, and select **Keys**. The API-key button on the
+   **AI LLM** tab also opens this page.
+3. Choose **Create API key** and copy the key when it is shown.
+4. Check the **AI LLM** tab for models available to your account.
+
+The portal requires the ASU network or VPN. The API itself works on or off campus
+without VPN. Run this project on your own computer; the commands do not submit a
+Sol job. See the [ASU API access guide](https://docs.rc.asu.edu/ai/api/).
+
+### 4. Configure Voyager
+
+Create `.env` only if you do not already have one:
+
+```bash
+test -f .env || cp .env.example .env
+```
+
+Open `.env` in your editor and fill in these settings:
 
 ```dotenv
-VOYAGER_API_KEY=your_voyager_key
+VOYAGER_API_KEY=your_voyager_api_key_here
 VOYAGER_MODEL=qwen38-27b
 VOYAGER_REASONING_EFFORT=none
 ```
 
-Build the database, then run the text-only baseline:
+The application loads `.env` automatically. You do not need to run `source .env`.
+Keep the real key in `.env`, which Git ignores. Leave keys blank in `.env.example`.
+
+Voyager requests use `https://openai.rc.asu.edu/v1/chat/completions`. The client
+uses verified HTTPS, a 120-second timeout, and at most two retries for temporary
+provider errors. The default output limit is 4096 tokens per request.
+
+### 5. Generate the synthetic ERP database
 
 ```bash
-python3 -m erpsim.build_world --seed 42 --out data/erp.db
-python3 run_baseline.py --all --baseline b1 --provider voyager --score
+python3 -B -m erpsim.build_world --seed 42 --out data/erp.db
 ```
 
-Voyager uses `https://openai.rc.asu.edu/v1/chat/completions`. The default reasoning
-setting is `none` to leave output tokens available for the JSON answer. Keep this
-setting and the model consistent when comparing the baseline and agent.
-Higher reasoning settings may require a larger output budget.
+This creates the ERP records, 18 support tickets, a hidden scoring table, and
+`examples/test1.txt`. Running it again regenerates `data/erp.db` and the example
+file. Keep evaluation databases in separate folders when comparing experiments.
 
-`VoyagerToolClient` in `agents/voyager_client.py` also exposes
-`chat(messages, tools=None)`, returning the same message, finish reason, token usage,
-retry count, and model fields as `GroqToolClient`. The agent passes the
-approved dispatcher definitions through this interface. This adds a provider,
-not the agent loop. Tool choice and call limits remain the controller's responsibility.
-Requests use a 120-second timeout and at most two retries for transient errors.
-Busy models can queue longer; a timeout is reported rather than treated as a diagnosis.
-
-See the [Voyager API documentation](https://docs.rc.asu.edu/ai/api/) and
-[chat and tool-calling reference](https://docs.rc.asu.edu/ai/api/chat/).
-Keep `.env` private. No real API key belongs in source control.
-
-## Tool-using agent
-
-The agent supports Groq or Voyager tool calling with the eight approved, read-only ERP
-lookups. It enforces a configurable tool-call budget (eight by default), caches
-duplicate requests within a ticket, verifies final evidence, and escalates unsafe
-or insufficient diagnoses.
-
-Set `GROQ_API_KEY` in your private `.env`, then run one generated ticket:
+### 6. Read the example ticket
 
 ```bash
-python run_agent_loop.py --ticket TKT-1005 --score
+cat examples/test1.txt
 ```
 
-To use Voyager instead, configure `VOYAGER_API_KEY` and run:
+For seed 42, this is **TKT-1011**, an invoice held up for Everline Supply Co.
+The invoice reference **INV-0342** appears in the ticket body.
+
+### 7. Run the agent with Voyager
 
 ```bash
-python3 run_agent_loop.py --ticket TKT-1011 --provider voyager --score
+python3 -B run_agent_loop.py \
+  --ticket TKT-1011 \
+  --provider voyager \
+  --model qwen38-27b \
+  --max-tool-calls 8 \
+  --score \
+  --out outputs/voyager-demo.jsonl
 ```
 
-The default terminal view shows live lookup progress, the diagnosis, exact evidence,
-verification status, recommended action, and whether human review is required.
-For the complete audit record instead, add `--json`. Save full results with `--out`:
+The terminal shows each lookup, the diagnosis, cited evidence, recommended action,
+escalation decision, and usage summary. `--out` saves the full JSON result and
+tool trace. `--score` reads the hidden answer key **after** the investigation;
+the agent's tools cannot access it.
+
+One recorded Voyager run returned:
+
+```text
+Records checked
+[1/8] Read invoice INV-0342: ok
+[2/8] Check customer C-136: ok
+[3/8] Check payments C-136: ok
+[4/8] Check background jobs credit_sync: ok
+
+Result: Verified diagnosis
+Diagnosis code: CREDIT_LIMIT_STALE_SYNC
+Recommended action: Review and rerun the background job
+Target: credit_sync
+Escalation: No
+
+Lookups: 4/8 | Model calls: 5 | Time: 16.25s
+Fully resolved: YES
+```
+
+This is an observed example, not a guaranteed result. Model output, lookup order,
+and timing can vary. “Fully resolved” means a verified diagnosis and recommendation;
+the system does not execute the recommended fix.
+
+## Other run commands
+
+Use a ticket text file:
 
 ```bash
-python3 run_agent_loop.py --all --limit 3 --provider voyager --score --out outputs/voyager-agent.jsonl
-python3 run_agent_loop.py --ticket TKT-1011 --provider voyager --json
+python3 -B run_agent_loop.py --input examples/test1.txt --provider voyager --score
 ```
 
-The agent offers a typed `submit_diagnosis` action alongside the eight database
-tools. It submits an answer without reading or changing data, and does not consume
-a database lookup. Every citation must match a record and field actually retrieved
-in that ticket and pass the database/relationship verifier. A tool request emitted
-as plain-text markup can be corrected once; it is never executed as text. A final
-answer with schema or evidence errors can be corrected once using existing facts,
-with database tools disabled. Both attempts and their verification results are
-retained in the audit record. Failed corrections escalate.
-
-Voyager's `qwen38-27b` supports native tool calling but does not advertise strict
-response-schema support. The agent uses the submission function's parameter schema
-and local validation rather than requesting an unsupported JSON-schema API mode.
-Controller updates remain in the initial system message for model compatibility.
-The `--score` full-resolution result also requires successful verification, valid
-output, and no escalation. Record-ID validity alone does not prove field/value
-accuracy. Small sample runs are smoke tests, not final held-out evaluation results.
-
-Voyager defaults to `qwen38-27b`; `--model` overrides the selected provider's model.
-The default provider remains Groq when `--provider` is omitted.
-
-Other useful commands:
+Run a small batch:
 
 ```bash
-python run_agent_loop.py --input examples/test1.txt
-python run_agent_loop.py --all --limit 5 --score --out outputs/agent.jsonl
-python run_agent_loop.py --ticket TKT-1005 --max-tool-calls 4
+python3 -B run_agent_loop.py --all --limit 3 --provider voyager --score --out outputs/voyager-batch.jsonl
 ```
 
-The live agent never accesses `fault_log`; `--score` reads it separately after
-the investigation. B0/B1 remain unchanged.
-
-## More baseline commands
+Print the complete JSON instead of the readable terminal summary:
 
 ```bash
-python run_baseline.py --all --baseline b0 --score            # rule baseline
-python run_baseline.py --all --baseline b1 --provider gemini --score
-python run_baseline.py --ticket TKT-1005 --score
+python3 -B run_agent_loop.py --ticket TKT-1011 --provider voyager --json
 ```
 
-## Layout
+Use `--db PATH` to select another generated database. Run `python3 run_agent_loop.py
+--help` for all options. Specify `--provider voyager`: the agent's default provider
+is Groq.
 
+## Run the baselines
+
+| System | Database access | Model behavior |
+| --- | --- | --- |
+| B0 | None | Keyword rules; no model |
+| B1 | None | One model call using ticket text |
+| B1-DB | Fixed read-only sequence | One model call after retrieval |
+| Adaptive agent | Model-selected read-only tools | Chooses the next lookup from earlier observations |
+
+```bash
+# B0: no API key needed
+python3 -B run_baseline.py --ticket TKT-1011 --baseline b0 --score
+
+# B1: ticket text only
+python3 -B run_baseline.py --ticket TKT-1011 --baseline b1 --provider voyager --model qwen38-27b --score
+
+# B1-DB: fixed database lookups, then one model call
+python3 -B run_baseline.py --ticket TKT-1011 --baseline b1-db --provider voyager --model qwen38-27b --score
 ```
-erpsim/build_world.py   world + fault injection + ticket generation
-erpsim/schema.sql       12 ERP tables, plus tickets and fault_log
-erpsim/taxonomy.py      the closed root-cause vocabulary
-agents/llm.py           provider-agnostic client (urllib, no SDKs)
-agents/baseline.py      B0 keyword rules, B1 single LLM call
-agents/agent_loop.py    bounded tool-using investigation controller
-agents/groq_client.py   Groq chat/tool-calling client
-tools/dispatcher.py     approved tool allowlist and argument validation
-eval/score.py           grading against fault_log
-run_baseline.py         CLI
-run_agent_loop.py       tool-using agent CLI
+
+B1-DB checks invoice, order, customer, deliveries, payments, price list, credit-sync
+history, and price-sync history. Invoice tickets use eight lookups; order tickets
+omit the invoice lookup and use seven. Job history covers the ticket date and
+preceding 14 days. The model cannot request more records or repair its answer.
+
+B1 may return `UNKNOWN` because ticket text alone does not establish the cause.
+That is different from a failed API request. Failed evidence or action verification
+can also cause B1-DB or the agent to escalate.
+
+For an offline baseline smoke check, use `--provider mock` with B1. Mock responses
+are software checks, not model evaluation results. The live agent supports Groq
+and Voyager, not the mock provider.
+
+## Reproduce the preliminary evaluation
+
+Generate the separate dataset collection in a new output folder:
+
+```bash
+python3 -B -m eval.datasets --out outputs/comparison/datasets
 ```
 
-`data/erp.db` is regenerated from the seed, not committed.
+It creates 60 development cases, 30 isolated supported test cases, 12 unsupported
+cases, and the original 18-ticket reference set. The development cases are excluded
+from the following comparison:
 
-## The answer key
+```bash
+python3 -B -m eval.experiment \
+  --manifest outputs/comparison/datasets/manifest.json \
+  --out outputs/comparison/run \
+  --provider voyager \
+  --model qwen38-27b \
+  --workers 2 \
+  --systems b0 b1 fixed agent
+```
 
-`fault_log` holds the ground truth. It lives in the same SQLite file but will
-have **no accessor in the tool layer**: the scorer reads it directly, the
-agent never can.
+This evaluates **60 tickets across four systems: 240 system runs**. It makes live
+model requests and takes longer than the single-ticket demo. Results, settings,
+and tool traces are saved under `outputs/comparison/run/`. To evaluate only B1-DB,
+use `--systems fixed`. Interrupted runs resume only when their settings and
+implementation fingerprints match.
+
+The generator uses fixed seeds. A new folder reproduces the same cases; it does
+not create a fresh unseen dataset. Both datasets are synthetic and share wording
+templates. The original reference tickets were previously used for development.
+
+The recorded comparison and its limitations are in
+[the preliminary evaluation report](reports/section3-with-fixed-baseline-2026-11-08/section3-preliminary-results.txt).
+These are pilot results, not evidence of production ERP performance.
+
+## Run the tests
+
+```bash
+python3 -B -m unittest discover -s tests -v
+```
+
+These tests check the database tools, agent behavior, evidence verification, and
+evaluation logic without making live model requests.
+
+## Demo screenshots
+
+Use screenshots from an actual run and keep their text readable:
+
+| Screenshot | What to show | Suggested file |
+| --- | --- | --- |
+| Main demo image | Verified diagnosis, evidence, action, and escalation decision | `docs/images/verified-diagnosis.png` |
+| Ticket input | TKT-1011 and invoice reference INV-0342 | `docs/images/ticket-input.png` |
+| Investigation trace | Tool names, arguments, returned facts, and lookup count | `docs/images/tool-trace.png` |
+
+After adding the main image, place this below the title:
+
+```html
+<p align="center">
+  <img src="docs/images/verified-diagnosis.png"
+       alt="ERP Ticket Agent showing a verified diagnosis and supporting evidence"
+       width="100%">
+</p>
+```
+
+Crop screenshots to the relevant terminal output. Keep API keys and `.env` contents
+out of the images. Label screenshots with the ticket and provider used; keep timing
+and token figures tied to that recorded run.
+
+## Repository structure
+
+```text
+agents/                 agent loop, model clients, baselines, diagnosis and evidence checks
+tools/                  read-only database functions and approved tool dispatcher
+erpsim/                 synthetic database schema, fault injection, and ticket generation
+eval/                   scoring, dataset generation, and experiment runner
+ui/                     readable terminal output
+tests/                  offline automated checks
+examples/               example ticket text
+reports/                saved preliminary results and analysis
+run_agent_loop.py       adaptive-agent entry point
+run_baseline.py         B0, B1, and B1-DB entry point
+.env.example            environment template with empty API keys
+```
 
 ## Troubleshooting
 
-Free-tier API keys (especially Gemini) may throttle and return `429`/`503`.
-`llm.py` retries automatically with backoff, but for quick pipeline testing,
-use `--provider mock`: it's deterministic, keyless, and exercises the same
-code path without hitting rate limits.
+- **`python: command not found`:** use `python3` as shown above.
+- **Missing Voyager key:** check `VOYAGER_API_KEY` in the root `.env`, not
+  `.env.example`. Existing shell variables take precedence over `.env`.
+- **Cannot open Voyager:** connect to the ASU network or VPN to manage keys.
+- **HTTP 401/403:** check the key and your account's model access.
+- **HTTP 429 or a timeout:** the service may be busy. The Voyager client retries
+  temporary errors up to twice; if it still fails, try later and retain the error
+  in evaluation results.
+- **HTTPS certificate errors:** activate the environment and install
+  `requirements-ui.txt`. Keep certificate verification enabled.
+- **No database or ticket:** complete the seed-42 generation step, or check `--db`.
+- **Verification failed or escalation:** inspect the saved JSON audit and
+  verification errors. A predicted cause alone does not mean the ticket was resolved.
+
+API references: [Voyager access and keys](https://docs.rc.asu.edu/ai/api/) ·
+[Chat completions and tool calling](https://docs.rc.asu.edu/ai/api/chat/).
+
+## Project origin and license
+
+This CSE 598 capstone extends
+[Sachin's ERP ticket-agent baseline](https://github.com/sachinsss/cse598-erp-ticket-agent).
+The project uses synthetic ERP data and retains the repository's MIT license.
+See [LICENSE](LICENSE).

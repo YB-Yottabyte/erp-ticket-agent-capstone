@@ -119,6 +119,10 @@ def evaluate_agent(
             tool_trace = result.get(
                 "tool_trace"
             ) or []
+            scored["resolved"] = bool(
+                scored["resolved"] and verification.get("status") == "passed"
+                and not result.get("schema_problems") and not result.get("escalate")
+            )
             dispatcher_calls = sum(
                 1
                 for item in tool_trace
@@ -206,7 +210,7 @@ def aggregate(rows):
         "tier3_accuracy_pct": tier3_accuracy,
         "tier3_n": tier3_n,
         "json_complete_pct": percentage(
-            lambda row: not row["malformed"]
+            lambda row: not row["malformed"] and not row.get("schema_problems")
         ),
         "malformed_pct": percentage(
             lambda row: row["malformed"]
