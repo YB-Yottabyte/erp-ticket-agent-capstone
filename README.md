@@ -39,18 +39,29 @@ Set one of `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`. The
 `mock` provider is a pipeline stub, never a system under test, every
 measured number must come from a real provider.
 
-## Agent terminal (work in progress)
+## Tool-using agent
 
-The investigation loop has been removed so the assigned team member can implement
-it. The agent implementation, terminal entry point, and associated agent tests have
-been deleted. There is currently no agent command to run.
+The verified agent uses Groq tool calling with the eight approved, read-only ERP
+lookups. It enforces a configurable tool-call budget (eight by default), caches
+duplicate requests within a ticket, verifies final evidence, and escalates unsafe
+or insufficient diagnoses.
 
-The terminal layout and colors use standard Python with no Rich dependency.
-The optional `requirements-ui.txt` provides a CA bundle for Python HTTPS.
-Database tools, the dispatcher, evidence verification, and terminal rendering remain
-available for the future loop to use. See
-[agent terminal usage](docs/agent_terminal.md) for the previous design.
-B0/B1 remain unchanged.
+Set `GROQ_API_KEY` in your private `.env`, then run one generated ticket:
+
+```bash
+python run_agent_loop.py --ticket TKT-1005 --score
+```
+
+Other useful commands:
+
+```bash
+python run_agent_loop.py --input examples/test1.txt
+python run_agent_loop.py --all --limit 5 --score --out outputs/agent.jsonl
+python run_agent_loop.py --ticket TKT-1005 --max-tool-calls 4
+```
+
+The live agent never accesses `fault_log`; `--score` reads it separately after
+the investigation. B0/B1 remain unchanged.
 
 ## More baseline commands
 
@@ -68,8 +79,12 @@ erpsim/schema.sql       12 ERP tables, plus tickets and fault_log
 erpsim/taxonomy.py      the closed root-cause vocabulary
 agents/llm.py           provider-agnostic client (urllib, no SDKs)
 agents/baseline.py      B0 keyword rules, B1 single LLM call
+agents/agent_loop.py    bounded tool-using investigation controller
+agents/groq_client.py   Groq chat/tool-calling client
+tools/dispatcher.py     approved tool allowlist and argument validation
 eval/score.py           grading against fault_log
 run_baseline.py         CLI
+run_agent_loop.py       tool-using agent CLI
 ```
 
 `data/erp.db` is regenerated from the seed, not committed.
