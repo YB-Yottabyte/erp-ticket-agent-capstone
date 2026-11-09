@@ -21,7 +21,9 @@ Final development checks after the fixes:
 The first three cases were run together; the credit-sync case was checked
 separately with the same final settings. Actual latency and paths can vary.
 No corrections were needed on these final live runs. Scripted tests exercise
-the correction paths, including failed corrections and safe escalation.
+the correction paths, including failed corrections and safe escalation. The 41
+automated tests passed before the test files were later removed at the team's
+request; those test files are not included in the current checkout.
 
 During development, a strict response-schema request failed because the model
 advertises `supports_response_schema=false`. A separate final-turn HTTP 400 was
@@ -41,7 +43,6 @@ Reproduce the sample checks:
 ```bash
 python3 run_agent_loop.py --all --limit 3 --provider voyager --score --out outputs/voyager-three.jsonl
 python3 run_agent_loop.py --ticket TKT-1011 --provider voyager --score --out outputs/voyager-credit.jsonl
-python3 -B -m unittest discover -s tests
 ```
 
 Further evaluation must cover all six causes, unsupported tickets, isolated

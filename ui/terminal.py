@@ -72,6 +72,7 @@ class AgentTerminal:
         self.line(f"Read-only investigation | Up to {budget} lookups")
         self.line("-" * self.width, "90")
         self.line("Records checked", "36")
+        self.line()
 
     # Show each real tool result without dumping its complete database observation.
     def tool_result(self, record, budget):
@@ -96,6 +97,7 @@ class AgentTerminal:
             f"  [{record['attempt']}/{budget}] {name} {reference}: {status}{cached}",
             "32" if status == "ok" else "33",
         )
+        self.line()
 
     # Separate diagnosis, verification, recommendations, and evaluation in the summary.
     def result(self, result, score=None):
@@ -116,6 +118,7 @@ class AgentTerminal:
             f"{'Possible cause' if not passed else 'Cause'}: {self.CAUSES.get(code, code)}"
         )
         self.line(f"Diagnosis code: {code}")
+        self.line()
         self.line(result.get("root_cause_explanation", ""))
         self.line()
         self.line(
@@ -127,6 +130,7 @@ class AgentTerminal:
             ),
             "32" if passed else "33",
         )
+        self.line()
         evidence = result.get("evidence", [])
         for item in evidence[:6]:
             self.line(
@@ -144,6 +148,7 @@ class AgentTerminal:
             "Recommended action: " + self.ACTIONS.get(fix.get("action"), "Human review")
         )
         self.line(f"Target: {fix.get('target', 'support analyst')}")
+        self.line()
         self.line(f"Confidence: {result.get('confidence', 0):.0%} (model estimate)")
         self.line(f"Escalation: {'Yes' if needs_review else 'No'}")
         self.line("Recommendations only. No ERP data was changed")
@@ -158,8 +163,10 @@ class AgentTerminal:
                 self.line("  - " + self.clean(error))
         for error in result.get("provider_errors", [])[:1]:
             self.line("Provider error: " + error, "33")
+        self.line()
         reason = result.get("termination_reason", "Unknown")
         self.line("Stop reason: " + self.STOPS.get(reason, reason.replace("_", " ")))
+        self.line()
         usage = result.get("model_usage", {})
         self.line(
             f"Lookups: {result.get('tool_attempts', 0)}/{result.get('tool_budget', 8)} | Model calls: {result.get('model_calls', 0)} | Time: {result.get('elapsed_ms', 0) / 1000:.2f}s"

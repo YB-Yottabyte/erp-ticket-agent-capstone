@@ -60,14 +60,8 @@ the legacy score checks plus passed verification, valid output, and no escalatio
 The model's recommendation before escalation and the validation history remain in
 the audit record. JSON-mode summary lines carry `type: evaluation_summary`.
 
-## Tests
+## Validation history
 
-Run deterministic controller tests without a model key:
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-The tests use scripted model responses and a temporary synthetic database. They
-cover a normal tool turn, budget exhaustion, duplicate-call handling, malformed
-parallel calls, and invalid-ticket fallback.
+The automated test files were removed at the team's request. The previous suite
+covered normal tool turns, budget limits, recovery, evidence checks, and safe
+escalation. Historical results are recorded in `voyager_smoke_checks.md`.
