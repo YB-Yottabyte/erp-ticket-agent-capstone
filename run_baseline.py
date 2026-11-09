@@ -53,7 +53,7 @@ def main():
     src.add_argument("--all", action="store_true", help="every generated ticket")
     ap.add_argument("--baseline", choices=["b0", "b1"], default="b1")
     ap.add_argument("--provider", default="mock",
-                    choices=["mock", "gemini", "anthropic", "openai", "groq"])
+                    choices=["mock", "gemini", "anthropic", "openai", "groq", "voyager"])
     ap.add_argument("--model", default=None)
     ap.add_argument("--db", default=DB)
     ap.add_argument("--score", action="store_true", help="grade against fault_log")
