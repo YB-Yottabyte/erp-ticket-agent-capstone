@@ -79,6 +79,24 @@ def aggregate(rows):
     if not rows:
         return {}
     number_of_cases = len(rows)
+    def tier_accuracy(tier):
+        tier_rows = [
+            row
+            for row in rows
+            if row.get("tier") == tier
+        ]
+        if not tier_rows:
+            return None, 0
+        correct = sum(
+            1
+            for row in tier_rows
+            if row["code_ok"]
+        )
+        accuracy = round(
+            (correct / len(tier_rows)) * 100,
+            1,
+        )
+        return accuracy, len(tier_rows)
     def percentage(condition):
         count = sum(
             1
@@ -89,7 +107,16 @@ def aggregate(rows):
             (count / number_of_cases) * 100,
             1,
         )
+    tier1_accuracy, tier1_n = tier_accuracy(1)
+    tier2_accuracy, tier2_n = tier_accuracy(2)
+    tier3_accuracy, tier3_n = tier_accuracy(3)
     summary = {
+        "tier1_accuracy_pct": tier1_accuracy,
+        "tier1_n": tier1_n,
+        "tier2_accuracy_pct": tier2_accuracy,
+        "tier2_n": tier2_n,
+        "tier3_accuracy_pct": tier3_accuracy,
+        "tier3_n": tier3_n,
         "total_cases": number_of_cases,
         "root_cause_accuracy_pct": percentage(
             lambda row: row["code_ok"]
