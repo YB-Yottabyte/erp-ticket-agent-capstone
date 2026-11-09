@@ -20,6 +20,7 @@ class TestEvaluation(unittest.TestCase):
                 "evidence_relevant": True,
                 "hallucinated_evidence": False,
                 "escalated": False,
+                "malformed": False,
                 "latency_seconds": 1.0,
                 "total_tokens": 100,
             },
@@ -31,6 +32,7 @@ class TestEvaluation(unittest.TestCase):
                 "evidence_relevant": False,
                 "hallucinated_evidence": True,
                 "escalated": True,
+                "malformed": True,
                 "latency_seconds": 3.0,
                 "total_tokens": 300,
             },
@@ -43,6 +45,8 @@ class TestEvaluation(unittest.TestCase):
         self.assertEqual(summary["hallucinated_evidence_pct"],50.0)
         self.assertEqual(summary["avg_latency_seconds"],2.0)
         self.assertEqual(summary["avg_total_tokens"],200.0)
+        self.assertEqual(summary["json_complete_pct"],50.0)
+        self.assertEqual(summary["malformed_pct"],50.0)
 
     def test_empty_results(self):
         self.assertEqual(aggregate([]),{})

@@ -111,15 +111,21 @@ def aggregate(rows):
     tier2_accuracy, tier2_n = tier_accuracy(2)
     tier3_accuracy, tier3_n = tier_accuracy(3)
     summary = {
+        "total_cases": number_of_cases,
+        "root_cause_accuracy_pct": percentage(
+            lambda row: row["code_ok"]
+        ),
         "tier1_accuracy_pct": tier1_accuracy,
         "tier1_n": tier1_n,
         "tier2_accuracy_pct": tier2_accuracy,
         "tier2_n": tier2_n,
         "tier3_accuracy_pct": tier3_accuracy,
         "tier3_n": tier3_n,
-        "total_cases": number_of_cases,
-        "root_cause_accuracy_pct": percentage(
-            lambda row: row["code_ok"]
+        "json_complete_pct": percentage(
+            lambda row: not row["malformed"]
+        ),
+        "malformed_pct": percentage(
+            lambda row: row["malformed"]
         ),
         "full_resolution_pct": percentage(
             lambda row: row["resolved"]
