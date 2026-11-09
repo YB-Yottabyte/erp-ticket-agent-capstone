@@ -9,6 +9,7 @@ from pathlib import Path
 
 from agents.agent_loop import ERPAgent
 from agents.groq_client import GroqToolClient
+from agents.voyager_client import VoyagerToolClient
 from agents.llm import LLMError
 from eval.score import fault_for, render, score_one, summarise
 from run_baseline import parse_ticket_file
@@ -39,11 +40,14 @@ def load_tickets(db_path, ticket_id=None, limit=None):
         connection.close()
 
 
-def build_agent(db_path, model, max_tool_calls):
+def build_agent(db_path, model, max_tool_calls, provider="groq"):
     """Build the live agent from the repository's read-only integrations."""
     database = ERPDatabase(db_path)
     dispatcher = ToolDispatcher(ToolRegistry(database))
-    client = GroqToolClient(model=model)
+    clients = {"groq": GroqToolClient, "voyager": VoyagerToolClient}
+    if provider not in clients:
+        raise ValueError("Provider must be groq or voyager")
+    client = clients[provider](model=model)
     return ERPAgent(client, dispatcher, database, max_tool_calls=max_tool_calls)
 
 
@@ -56,7 +60,11 @@ def main():
     source.add_argument("--ticket", help="ticket ID from the database")
     source.add_argument("--all", action="store_true", help="every generated ticket")
     parser.add_argument("--db", default=DEFAULT_DB, help="read-only ERP database path")
-    parser.add_argument("--model", default=None, help="optional Groq model override")
+    parser.add_argument(
+        "--provider", choices=["groq", "voyager"], default="groq",
+        help="model provider (default: groq)",
+    )
+    parser.add_argument("--model", default=None, help="optional provider model override")
     parser.add_argument(
         "--max-tool-calls", type=int, default=8, help="maximum logical tool attempts"
     )
@@ -82,7 +90,7 @@ def main():
         sys.exit("no tickets matched")
 
     try:
-        agent = build_agent(args.db, args.model, args.max_tool_calls)
+        agent = build_agent(args.db, args.model, args.max_tool_calls, args.provider)
     except (LLMError, TypeError, ValueError) as error:
         sys.exit(f"agent setup error: {error}")
 

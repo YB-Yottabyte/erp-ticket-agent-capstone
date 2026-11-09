@@ -59,12 +59,12 @@ python3 run_baseline.py --all --baseline b1 --provider voyager --score
 
 Voyager uses `https://openai.rc.asu.edu/v1/chat/completions`. The default reasoning
 setting is `none` to leave output tokens available for the JSON answer. Keep this
-setting and the model consistent when comparing the baseline and future agent.
+setting and the model consistent when comparing the baseline and agent.
 Higher reasoning settings may require a larger output budget.
 
 `VoyagerToolClient` in `agents/voyager_client.py` also exposes
 `chat(messages, tools=None)`, returning the same message, finish reason, token usage,
-retry count, and model fields as `GroqToolClient`. The future agent can pass the
+retry count, and model fields as `GroqToolClient`. The agent passes the
 approved dispatcher definitions through this interface. This adds a provider,
 not the agent loop. Tool choice and call limits remain the controller's responsibility.
 Requests use a 120-second timeout and at most two retries for transient errors.
@@ -76,7 +76,7 @@ Keep `.env` private. No real API key belongs in source control.
 
 ## Tool-using agent
 
-The verified agent uses Groq tool calling with the eight approved, read-only ERP
+The agent supports Groq or Voyager tool calling with the eight approved, read-only ERP
 lookups. It enforces a configurable tool-call budget (eight by default), caches
 duplicate requests within a ticket, verifies final evidence, and escalates unsafe
 or insufficient diagnoses.
@@ -86,6 +86,15 @@ Set `GROQ_API_KEY` in your private `.env`, then run one generated ticket:
 ```bash
 python run_agent_loop.py --ticket TKT-1005 --score
 ```
+
+To use Voyager instead, configure `VOYAGER_API_KEY` and run:
+
+```bash
+python3 run_agent_loop.py --ticket TKT-1011 --provider voyager --score
+```
+
+Voyager defaults to `qwen38-27b`; `--model` overrides the selected provider's model.
+The default provider remains Groq when `--provider` is omitted.
 
 Other useful commands:
 
