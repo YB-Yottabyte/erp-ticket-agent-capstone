@@ -30,6 +30,7 @@ or no safe useful lookup remains, return only a JSON object with these fields:
 root_cause_code, root_cause_explanation, evidence, proposed_fix, confidence,
 and escalate. Each evidence item must contain entity, id, field, and observed.
 If evidence is insufficient or contradictory, choose UNKNOWN and escalate.
+proposed_fix must be an object with both action and target, never a string.
 """
 
 
