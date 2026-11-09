@@ -240,15 +240,15 @@ Use screenshots from an actual run and keep their text readable:
 
 | Screenshot | What to show | Suggested file |
 | --- | --- | --- |
-| Main demo image | Verified diagnosis, evidence, action, and escalation decision | `docs/images/verified-diagnosis.png` |
-| Ticket input | TKT-1011 and invoice reference INV-0342 | `docs/images/ticket-input.png` |
-| Investigation trace | Tool names, arguments, returned facts, and lookup count | `docs/images/tool-trace.png` |
+| Main demo image | Verified diagnosis, evidence, action, and escalation decision | `images/verified-diagnosis.png` |
+| Ticket input | TKT-1011 and invoice reference INV-0342 | `images/ticket-input.png` |
+| Investigation trace | Tool names, arguments, returned facts, and lookup count | `images/tool-trace.png` |
 
 After adding the main image, place this below the title:
 
 ```html
 <p align="center">
-  <img src="docs/images/verified-diagnosis.png"
+  <img src="images/verified-diagnosis.png"
        alt="ERP Ticket Agent showing a verified diagnosis and supporting evidence"
        width="100%">
 </p>
