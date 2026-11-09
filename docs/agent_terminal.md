@@ -60,8 +60,13 @@ the legacy score checks plus passed verification, valid output, and no escalatio
 The model's recommendation before escalation and the validation history remain in
 the audit record. JSON-mode summary lines carry `type: evaluation_summary`.
 
-## Validation history
+## Tests
 
-The automated test files were removed at the team's request. The previous suite
-covered normal tool turns, budget limits, recovery, evidence checks, and safe
-escalation. Historical results are recorded in `voyager_smoke_checks.md`.
+Sindhu's evidence tests and Neil's agent-loop tests remain available:
+
+```bash
+python3 -B -m unittest discover -s tests
+```
+
+Only the additional `test_agent_recovery.py` file introduced for PR #19 was removed.
+Its historical results remain recorded in `voyager_smoke_checks.md`.
