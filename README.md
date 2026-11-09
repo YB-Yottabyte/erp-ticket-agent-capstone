@@ -39,6 +39,41 @@ Set one of `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, or `OPENAI_API_KEY`. The
 `mock` provider is a pipeline stub, never a system under test, every
 measured number must come from a real provider.
 
+## Voyager provider
+
+Copy `.env.example` to `.env` if you do not already have a local `.env`.
+Add the following settings to `.env`, replacing the placeholder locally:
+
+```dotenv
+VOYAGER_API_KEY=your_voyager_key
+VOYAGER_MODEL=qwen38-27b
+VOYAGER_REASONING_EFFORT=none
+```
+
+Build the database, then run the text-only baseline:
+
+```bash
+python3 -m erpsim.build_world --seed 42 --out data/erp.db
+python3 run_baseline.py --all --baseline b1 --provider voyager --score
+```
+
+Voyager uses `https://openai.rc.asu.edu/v1/chat/completions`. The default reasoning
+setting is `none` to leave output tokens available for the JSON answer. Keep this
+setting and the model consistent when comparing the baseline and future agent.
+Higher reasoning settings may require a larger output budget.
+
+`VoyagerToolClient` in `agents/voyager_client.py` also exposes
+`chat(messages, tools=None)`, returning the same message, finish reason, token usage,
+retry count, and model fields as `GroqToolClient`. The future agent can pass the
+approved dispatcher definitions through this interface. This adds a provider,
+not the agent loop. Tool choice and call limits remain the controller's responsibility.
+Requests use a 120-second timeout and at most two retries for transient errors.
+Busy models can queue longer; a timeout is reported rather than treated as a diagnosis.
+
+See the [Voyager API documentation](https://docs.rc.asu.edu/ai/api/) and
+[chat and tool-calling reference](https://docs.rc.asu.edu/ai/api/chat/).
+Keep `.env` private. No real API key belongs in source control.
+
 ## Tool-using agent
 
 The verified agent uses Groq tool calling with the eight approved, read-only ERP
