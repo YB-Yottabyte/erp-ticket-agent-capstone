@@ -10,8 +10,7 @@ automatic. No real data is used anywhere.
 
 Two baselines are included: **B0** (regex rules, no model, no database) and
 **B1** (a single LLM call, ticket text only, no database access). Neither can
-query the ERP, and is what a future tool-using agent will
-have to improve on.
+query the ERP. The verified tool-using agent below is evaluated against both.
 
 ## Requirements
 
@@ -133,6 +132,64 @@ python run_agent_loop.py --ticket TKT-1005 --max-tool-calls 4
 The live agent never accesses `fault_log`; `--score` reads it separately after
 the investigation. B0/B1 remain unchanged.
 
+## Implemented components
+
+| Area | Files | Responsibility |
+| --- | --- | --- |
+| Synthetic ERP and taxonomy | `erpsim/schema.sql`, `erpsim/build_world.py`, `erpsim/taxonomy.py` | Defines ERP tables, generates fault-isolated tickets, and defines the six root-cause codes and approved actions. |
+| Safe ERP tools | `tools/database.py`, `tools/dispatcher.py` | Opens SQLite read-only, exposes eight allowlisted lookups, validates arguments, rejects arbitrary SQL, and never exposes `fault_log`. |
+| Agent controller | `agents/agent_loop.py` | Runs the bounded model-tool loop, maintains per-ticket state, prevents repeated calls, tracks up to eight lookup attempts, validates final output, and makes the final escalation decision. |
+| Model clients | `agents/groq_client.py`, `agents/voyager_client.py`, `agents/llm.py` | Calls Groq or ASU Voyager with tool definitions; `llm.py` also supports text-only baseline providers. |
+| Diagnosis contract | `agents/diagnosis.py`, `agents/baseline.py` | Defines and validates the structured diagnosis schema: cause, explanation, citations, action, confidence, and escalation. |
+| Evidence verification | `agents/evidence.py` | Verifies cited entity/ID/field/value pairs, ticket-record relationships, fault-specific evidence requirements, and action/target correctness. |
+| Terminal and CLI | `run_agent_loop.py`, `ui/terminal.py`, `run_baseline.py` | Loads tickets, runs the agent or baselines, renders live lookup progress, prints JSON audit records, and supports optional scoring/output files. |
+| Evaluation | `eval/score.py`, `eval/evaluate.py`, `eval/case_generation.py` | Scores predictions after runs complete, computes aggregate metrics, and supports repeatable evaluation/case-generation work. |
+| Tests | `tests/test_agent_loop.py`, `tests/test_evidence.py`, `tests/test_evaluate.py` | Exercise loop controls, evidence verification policies, and evaluation metric calculations. |
+
+### Agent workflow
+
+```text
+Ticket → validate/reference extraction → model chooses one approved tool
+      → dispatcher validates → read-only ERP observation → update state
+      → model chooses next step or submits diagnosis → output/evidence validation
+      → verified resolution or forced escalation
+```
+
+The controller stores conversation messages, a per-ticket tool cache, tool trace,
+retry/duplicate counters, usage data, and a termination reason. An exact repeated
+tool call uses the cached observation once; a second duplicate safely terminates the
+investigation. `database_error` and `tool_error` may receive one bounded retry.
+
+Final answers are checked twice: `DiagnosisValidator` first confirms the strict
+output schema and that cited fields were retrieved during the run; then
+`verify_diagnosis` confirms database values, transaction relationships, root-cause
+support, and the approved action. Any failure forces `ESCALATE`.
+
+## Tests and evaluation
+
+Run deterministic unit tests without an API key:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Run baseline-only evaluation offline:
+
+```bash
+python -m eval.evaluate --systems b0 --limit 10
+```
+
+Run a comparative live evaluation after configuring the required model keys:
+
+```bash
+python -m eval.evaluate --systems b0 b1 agent --provider voyager --agent-provider voyager --limit 10 --out outputs/evaluation.json
+```
+
+`eval/score.py` reads the hidden `fault_log` only after a run has produced an
+answer. It reports root-cause accuracy, full-resolution rate, evidence validity and
+relevance, hallucinated evidence, escalation behavior, latency, tokens, and tool
+usage. The agent itself has no tool or prompt access to the answer key.
+
 ## More baseline commands
 
 ```bash
@@ -144,17 +201,15 @@ python run_baseline.py --ticket TKT-1005 --score
 ## Layout
 
 ```
-erpsim/build_world.py   world + fault injection + ticket generation
-erpsim/schema.sql       12 ERP tables, plus tickets and fault_log
-erpsim/taxonomy.py      the closed root-cause vocabulary
-agents/llm.py           provider-agnostic client (urllib, no SDKs)
-agents/baseline.py      B0 keyword rules, B1 single LLM call
-agents/agent_loop.py    bounded tool-using investigation controller
-agents/groq_client.py   Groq chat/tool-calling client
-tools/dispatcher.py     approved tool allowlist and argument validation
-eval/score.py           grading against fault_log
-run_baseline.py         CLI
-run_agent_loop.py       tool-using agent CLI
+erpsim/                 schema, taxonomy, world builder, and synthetic tickets
+tools/                  read-only database lookups and dispatcher allowlist
+agents/                 baselines, agent loop, diagnosis validator, model clients,
+                        and evidence verification
+ui/terminal.py          readable live agent-run output
+eval/                   scorer, evaluation harness, and case-generation helpers
+tests/                  deterministic unit tests
+run_baseline.py         B0/B1 CLI
+run_agent_loop.py       verified tool-using agent CLI
 ```
 
 `data/erp.db` is regenerated from the seed, not committed.
