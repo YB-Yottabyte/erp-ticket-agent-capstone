@@ -93,6 +93,32 @@ To use Voyager instead, configure `VOYAGER_API_KEY` and run:
 python3 run_agent_loop.py --ticket TKT-1011 --provider voyager --score
 ```
 
+The default terminal view shows live lookup progress, the diagnosis, exact evidence,
+verification status, recommended action, and whether human review is required.
+For the complete audit record instead, add `--json`. Save full results with `--out`:
+
+```bash
+python3 run_agent_loop.py --all --limit 3 --provider voyager --score --out outputs/voyager-agent.jsonl
+python3 run_agent_loop.py --ticket TKT-1011 --provider voyager --json
+```
+
+The agent offers a typed `submit_diagnosis` action alongside the eight database
+tools. It submits an answer without reading or changing data, and does not consume
+a database lookup. Every citation must match a record and field actually retrieved
+in that ticket and pass the database/relationship verifier. A tool request emitted
+as plain-text markup can be corrected once; it is never executed as text. A final
+answer with schema or evidence errors can be corrected once using existing facts,
+with database tools disabled. Both attempts and their verification results are
+retained in the audit record. Failed corrections escalate.
+
+Voyager's `qwen38-27b` supports native tool calling but does not advertise strict
+response-schema support. The agent uses the submission function's parameter schema
+and local validation rather than requesting an unsupported JSON-schema API mode.
+Controller updates remain in the initial system message for model compatibility.
+The `--score` full-resolution result also requires successful verification, valid
+output, and no escalation. Record-ID validity alone does not prove field/value
+accuracy. Small sample runs are smoke tests, not final held-out evaluation results.
+
 Voyager defaults to `qwen38-27b`; `--model` overrides the selected provider's model.
 The default provider remains Groq when `--provider` is omitted.
 
