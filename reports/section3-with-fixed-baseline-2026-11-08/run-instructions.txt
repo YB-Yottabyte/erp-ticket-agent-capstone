@@ -10,4 +10,4 @@ python3 -B -m eval.experiment --manifest outputs/fresh-comparison/datasets/manif
 
 The default generator reproduces the same seeds. For a genuinely fresh held-out set after tuning, choose a new independently specified seed/wording split; changing only the output directory does not create fresh cases.
 
-Configure VOYAGER_API_KEY privately and use required network access. Raw zero-fee fields assume no access charge and are not measured billing. See settings.json for the exact two-phase fingerprints; results.jsonl.gz contains all 240 records, including failures. Original results remain separately archived in reports/section3-2026-11-08.
+Configure VOYAGER_API_KEY privately and use required network access. Raw zero-fee fields assume no access charge and are not measured billing. See settings.json for the exact two-phase fingerprints; results.jsonl.gz contains all 240 records, including failures. The combined archive preserves the original 180 records and the 60 additional B1-DB runs.
