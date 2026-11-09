@@ -8,6 +8,7 @@ from agents.baseline import run_b0, run_b1
 from agents.llm import LLMError
 from eval.score import fault_for, score_one
 from run_baseline import load_tickets
+from run_agent_loop import build_agent, load_tickets as load_agent_tickets
 
 def _token_total(usage):
     if not isinstance(usage, dict):
@@ -71,6 +72,89 @@ def evaluate_baseline(db_path,baseline,provider="mock",model=None,limit=None):
                 termination_reason="baseline_complete",
             )
             rows.append(result)
+    finally:
+        connection.close()
+    return rows
+
+def evaluate_agent(
+    db_path,
+    provider="groq",
+    model=None,
+    max_tool_calls=8,
+    limit=None,
+):
+    tickets = load_agent_tickets(
+        db_path,
+        limit=limit,
+    )
+    connection = sqlite3.connect(db_path)
+    rows =[]
+    agent = build_agent(
+        db_path,
+        model,
+        max_tool_calls,
+        provider=provider,
+    )
+    try:
+        for ticket in tickets:
+            result = agent.run_loop(ticket)
+
+            fault = fault_for(
+                connection,
+                ticket["id"],
+            )
+            if fault is None:
+                continue
+            scored = score_one(
+                connection,
+                result,
+                fault,
+            )
+            usage = result.get(
+                "model_usage"
+            ) or {}
+            verification = result.get(
+                "verification"
+            ) or {}
+            tool_trace = result.get(
+                "tool_trace"
+            ) or []
+            dispatcher_calls = sum(
+                1
+                for item in tool_trace
+                if (
+                    item.get("tool_name") is not None
+                    and not item.get("cache_hit", False)
+                )
+            )
+            scored.update(
+                system="agent",
+                latency_seconds=round(
+                    result.get("elapsed_ms", 0)
+                    / 1000,
+                    6,
+                ),
+                input_tokens=usage.get(
+                    "input_tokens"
+                ),
+                output_tokens=usage.get(
+                    "output_tokens"
+                ),
+                total_tokens=_token_total(
+                    usage
+                ),
+                tool_calls=result.get(
+                    "tool_attempts"
+                ),
+                dispatcher_calls=dispatcher_calls,
+                verifier_status=verification.get(
+                    "status"
+                ),
+                termination_reason=result.get(
+                    "termination_reason"
+                ),
+            )
+            rows.append(scored)
     finally:
         connection.close()
     return rows
@@ -157,7 +241,36 @@ def aggregate(rows):
                 for row in rows
             ]
         ),
+        "avg_tool_calls": _mean(
+            [
+                row.get("tool_calls")
+                for row in rows
+            ]
+        ),
+
+        "avg_dispatcher_calls": _mean(
+            [
+                row.get("dispatcher_calls")
+                for row in rows
+            ]
+        ),
     }
+    verifier_rows = [
+        row
+        for row in rows
+        if row.get("verifier_status") is not None
+    ]
+    if verifier_rows:
+        passed = sum(
+            1
+            for row in verifier_rows
+            if row["verifier_status"] == "passed"
+        )
+
+        summary["verifier_pass_pct"] = round(
+            passed / len(verifier_rows) * 100,
+            1,
+        )
     return summary
 
 def print_summary(system, summary):
@@ -169,14 +282,20 @@ def print_summary(system, summary):
         print(f"{metric:32} {value}")
         
 def main():
-    parser = argparse.ArgumentParser(description="Evaluate ERP ticket baselines.")
+    parser = argparse.ArgumentParser(description="Evaluate ERP ticket systems.")
     parser.add_argument("--db",default="data/erp.db")
-    parser.add_argument("--systems",nargs="+",choices=["b0", "b1"],default=["b0"])
+    parser.add_argument("--systems",nargs="+",choices=["b0", "b1", "agent"],default=["b0"])
     parser.add_argument( "--provider",default="mock")
     parser.add_argument("--model",default=None)
     parser.add_argument("--limit",type=int,default=None,)
     parser.add_argument("--out",default=None,
     help="Optional JSON file for saving evaluation results.",
+    )
+    parser.add_argument("--max-tool-calls",type=int,default=8)
+    parser.add_argument(
+        "--agent-provider",
+        choices=["groq", "voyager"],
+        default="groq",
     )
     args = parser.parse_args()
 
@@ -187,8 +306,22 @@ def main():
     all_results = {}
     try:
         for system in args.systems:
-            rows = evaluate_baseline(args.db,system,provider=args.provider,model=args.model,limit=args.limit)
-
+            if system in {"b0", "b1"}:
+                rows = evaluate_baseline(
+                    args.db,
+                    system,
+                    provider=args.provider,
+                    model=args.model,
+                    limit=args.limit,
+                )
+            else:
+                rows = evaluate_agent(
+                args.db,
+                provider=args.agent_provider,
+                model=args.model,
+                max_tool_calls=args.max_tool_calls,
+                limit=args.limit,
+            )
             print(
                 f"\nEvaluated {len(rows)} tickets "
                 f"using {system.upper()}"
@@ -199,7 +332,8 @@ def main():
                     f"{row['ticket_id']}: "
                     f"expected={row['expected_code']} "
                     f"predicted={row['predicted_code']} "
-                    f"correct={row['code_ok']}"
+                    f"correct={row['code_ok']} "
+                    f"termination={row.get('termination_reason')}"
                 )
             summary = aggregate(rows)
             print_summary(system,summary)

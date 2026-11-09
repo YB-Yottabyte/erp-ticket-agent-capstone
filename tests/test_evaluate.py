@@ -23,6 +23,9 @@ class TestEvaluation(unittest.TestCase):
                 "malformed": False,
                 "latency_seconds": 1.0,
                 "total_tokens": 100,
+                "tool_calls": 2,
+                "dispatcher_calls": 2,
+                "verifier_status": "passed",
             },
             {
                 "code_ok": False,
@@ -35,6 +38,9 @@ class TestEvaluation(unittest.TestCase):
                 "malformed": True,
                 "latency_seconds": 3.0,
                 "total_tokens": 300,
+                "tool_calls": 4,
+                "dispatcher_calls": 3,
+                "verifier_status": "failed",
             },
         ]
         summary = aggregate(rows)
@@ -47,6 +53,9 @@ class TestEvaluation(unittest.TestCase):
         self.assertEqual(summary["avg_total_tokens"],200.0)
         self.assertEqual(summary["json_complete_pct"],50.0)
         self.assertEqual(summary["malformed_pct"],50.0)
+        self.assertEqual(summary["avg_tool_calls"], 3.0)
+        self.assertEqual(summary["avg_dispatcher_calls"], 2.5)
+        self.assertEqual(summary["verifier_pass_pct"], 50.0)
 
     def test_empty_results(self):
         self.assertEqual(aggregate([]),{})
