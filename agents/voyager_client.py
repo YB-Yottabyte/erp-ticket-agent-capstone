@@ -84,6 +84,8 @@ class VoyagerToolClient:
         }
         if tools:
             payload["tools"] = deepcopy(tools)
+            payload["tool_choice"] = "auto"
+            payload["parallel_tool_calls"] = False
         else:
             payload["response_format"] = {"type": "json_object"}
         request = urllib.request.Request(
