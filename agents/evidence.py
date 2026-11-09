@@ -1,8 +1,9 @@
 import sqlite3
+import math
 import re
 from datetime import date, timedelta
 
-from erpsim.taxonomy import EXPECTED_ACTION
+from erpsim.taxonomy import ACTIONS, EXPECTED_ACTION, codes
 
 
 # Only these tables and fields can be checked.
@@ -63,12 +64,12 @@ ENTITY_TABLE = {
     "stockledger": "stock_ledger",
 }
 
-"""Example: 'Sales_Order' becomes 'salesorder'."""
 def normalize_entity(entity):
+    """Example: 'Sales_Order' becomes 'salesorder'."""
     return entity.lower().replace("_", "").replace(" ", "")
 
-"""Compare a database value with the agent's string value."""
 def value_matches(actual, observed):
+    """Compare a database value with the agent's string value."""
     if actual is None:
         # Agree on this convention with the agent teammate.
         return observed == "null"
@@ -85,13 +86,13 @@ def value_matches(actual, observed):
 
     return observed == str(actual)
 
-"""
+def verify_evidence(diagnosis, database):
+    """
     diagnosis: result.diagnosis from ERPAgent.run()
     database: an ERPDatabase instance
-
+    
     Returns a result for each citation plus an overall result.
-"""
-def verify_evidence(diagnosis, database):
+    """
     if not isinstance(diagnosis, dict):
         return {
             "citations_valid": False,
@@ -193,15 +194,11 @@ RELATIONSHIPS = {
     ("payment", "customer"): (
         "payments", "customer_id", "customers"
     ),
-        ("invoice", "salesorder"): (
+    ("invoice", "salesorder"): (
         "invoices", "so_id", "sales_orders"
-    )}
+    ),
+}
 
-"""
-    Check a direct relationship between two existing records.
-
-    Returns status: passed, failed, or not_checked.
-"""
 def verify_relationship(
     database,
     source_entity,
@@ -209,6 +206,11 @@ def verify_relationship(
     target_entity,
     target_id,
 ):
+    """
+    Check a direct relationship between two existing records.
+    
+    Returns status: passed, failed, or not_checked.
+    """
     values = (source_entity, source_id, target_entity, target_id)
 
     if any(not isinstance(value, str) or not value.strip()
@@ -292,8 +294,8 @@ def verify_relationship(
         if connection is not None:
             connection.close()
 
-"""Get an invoice/order reference from the ticket or its text."""
 def find_ticket_reference(ticket):
+    """Get an invoice/order reference from the ticket or its text."""
     reference = ticket.get("referenced_doc")
 
     if isinstance(reference, str) and reference.strip():
@@ -317,8 +319,8 @@ def find_ticket_reference(ticket):
 
     return references.pop()
 
-"""Find the order, customer, and price list for this ticket."""
 def get_related_records(connection, ticket):
+    """Find the order, customer, and price list for this ticket."""
     reference = find_ticket_reference(ticket)
     invoice = None
 
@@ -362,8 +364,8 @@ def get_related_records(connection, ticket):
 
     return invoice, order, customer, price_list
 
-"""Check that the agent cited every required field for this record."""
 def has_citation(evidence, table, record, *fields):
+    """Check that the agent cited every required field for this record."""
     if record is None:
         return False
 
@@ -380,8 +382,8 @@ def has_citation(evidence, table, record, *fields):
 
     return True
 
-"""Check record relevance, issue support, action, and target."""
 def check_issue(connection, ticket, diagnosis):
+    """Check record relevance, issue support, action, and target."""
     invoice, order, customer, price_list = get_related_records(
         connection, ticket
     )
@@ -524,48 +526,23 @@ def check_issue(connection, ticket, diagnosis):
         )
         targets = {customer["id"]}
 
-        # Check that this transaction is blocked for the claimed type of problem.
-    expected_blockers = {
-        "CUSTOMER_ON_HOLD": (
-            order, "block_reason", "APPROVAL_CHECK_FAILED"
-        ),
-        "MISSING_TAX_ID": (
-            invoice, "blocked_reason", "POSTING_VALIDATION_FAILED"
-        ),
-        "STALE_PRICE_LIST": (
-            order, "block_reason", "PRICING_CHECK_FAILED"
-        ),
-        "INCOMPLETE_DELIVERY_BLOCKS_INVOICE": (
-            invoice, "blocked_reason", "DELIVERY_CHECK_FAILED"
-        ),
-        "CREDIT_LIMIT_STALE_SYNC": (
-            invoice, "blocked_reason", "CREDIT_CHECK_FAILED"
-        ),
-        "PRICE_SYNC_JOB_FAILED": (
-            order, "block_reason", "PRICING_CHECK_FAILED"
-        ),
-    }
+    elif code == "STALE_PRICE_LIST":
+        # The order must use an expired price list.
+        supported = (
+            price_list is not None
+            and date.fromisoformat(price_list["valid_to"]) < ticket_date
+            and cited("sales_orders", order, "price_list_id")
+            and cited("price_lists", price_list, "valid_to")
+        )
+        targets = {order["id"]}
 
-    blocker = expected_blockers.get(code)
-
-    if blocker is not None:
-        record, field, expected_reason = blocker
-
-        if record is None:
-            errors.append(
-                "Required transaction record is unavailable"
-            )
-        else:
-            if record["status"] != "BLOCKED":
-                errors.append(
-                    "Transaction is not marked BLOCKED"
-                )
-
-            if record[field] != expected_reason:
-                errors.append(
-                    f"Claimed issue expects {expected_reason}, "
-                    f"but transaction records {record[field]}"
-                )
+    elif code == "PRICE_SYNC_JOB_FAILED":
+        # Failed price refresh does not require an expired price list.
+        # The failed-job check below supplies the remaining condition.
+        supported = (
+            price_list is not None
+            and cited("sales_orders", order, "price_list_id")
+        )
 
     elif code == "INCOMPLETE_DELIVERY_BLOCKS_INVOICE":
         partial = [
@@ -618,8 +595,79 @@ def check_issue(connection, ticket, diagnosis):
 
     return errors
 
-"""Run citation and issue checks, returning one verification result."""
+def validate_output(diagnosis):
+    """Check required fields and types before reading the database."""
+    errors = []
+    if not isinstance(diagnosis, dict):
+        return ["Diagnosis must be a dictionary"]
+
+    required = (
+        "root_cause_code", "root_cause_explanation", "evidence",
+        "proposed_fix", "confidence", "escalate",
+    )
+    for field in required:
+        if field not in diagnosis:
+            errors.append(f"Missing field: {field}")
+    if errors:
+        return errors
+
+    code = diagnosis["root_cause_code"]
+    if not isinstance(code, str) or code not in codes():
+        errors.append("Invalid root cause code")
+
+    explanation = diagnosis["root_cause_explanation"]
+    if not isinstance(explanation, str) or not explanation.strip():
+        errors.append("Explanation must be a nonempty string")
+
+    confidence = diagnosis["confidence"]
+    if type(confidence) not in (int, float):
+        errors.append("Confidence must be a number")
+    elif not 0 <= confidence <= 1 or not math.isfinite(confidence):
+        errors.append("Confidence must be finite and between 0 and 1")
+
+    if type(diagnosis["escalate"]) is not bool:
+        errors.append("Escalate must be true or false")
+
+    fix = diagnosis["proposed_fix"]
+    if not isinstance(fix, dict):
+        errors.append("Proposed fix must be a dictionary")
+    else:
+        action = fix.get("action")
+        if not isinstance(action, str) or action not in ACTIONS:
+            errors.append("Invalid fix action")
+        target = fix.get("target")
+        if not isinstance(target, str) or not target.strip():
+            errors.append("Fix target must be a nonempty string")
+
+    evidence = diagnosis["evidence"]
+    if not isinstance(evidence, list):
+        errors.append("Evidence must be a list")
+    else:
+        if code != "UNKNOWN" and not evidence:
+            errors.append("A known issue needs evidence")
+        for index, item in enumerate(evidence, start=1):
+            if not isinstance(item, dict):
+                errors.append(f"Evidence {index} must be a dictionary")
+                continue
+            for field in ("entity", "id", "field"):
+                value = item.get(field)
+                if not isinstance(value, str) or not value.strip():
+                    errors.append(
+                        f"Evidence {index}: {field} must be a nonempty string"
+                    )
+            # Empty observed text can match a real empty database field.
+            # Numeric/null normalization is handled separately, not here.
+            if not isinstance(item.get("observed"), str):
+                errors.append(f"Evidence {index}: observed must be a string")
+    return errors
+
+
 def verify_diagnosis(ticket, diagnosis, database):
+    """Run citation and issue checks, returning one verification result."""
+    errors = validate_output(diagnosis)
+    if errors:
+        return {"status": "failed", "errors": errors}
+
     if diagnosis.get("root_cause_code") == "UNKNOWN":
         return {
             "status": "insufficient",

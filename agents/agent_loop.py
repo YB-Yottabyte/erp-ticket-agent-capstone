@@ -5,11 +5,10 @@ import json
 import re
 from time import perf_counter
 
-from agents.baseline import parse
+from agents.diagnosis import DiagnosisValidator
 from agents.evidence import verify_diagnosis
 from agents.llm import LLMError
-from erpsim.taxonomy import ACTIONS, taxonomy_prompt_block
-
+from erpsim.taxonomy import ACTIONS, EXPECTED_ACTION, taxonomy_prompt_block
 
 AGENT_SYSTEM_PROMPT = """You are an ERP support analyst investigating a stuck
 order-to-cash transaction.
@@ -28,7 +27,42 @@ call only when it can answer a missing question about this ticket. Do not repeat
 a request after receiving its result. When the available evidence is sufficient,
 or no safe useful lookup remains, return only a JSON object with these fields:
 root_cause_code, root_cause_explanation, evidence, proposed_fix, confidence,
-and escalate. Each evidence item must contain entity, id, field, and observed.
+and escalate. Use this exact structure (placeholders are not evidence):
+{{"root_cause_code":"<allowed code>","root_cause_explanation":"<short explanation>",
+"evidence":[{{"entity":"<entity>","id":"<one retrieved record ID>",
+"field":"<one exact column name>","observed":"<exact value as text>"}}],
+"proposed_fix":{{"action":"<allowed action>","target":"<record ID or job name>"}},
+"confidence":0.8,"escalate":false}}
+Use a numeric confidence between 0 and 1, never a percentage or label.
+Each citation must refer to one retrieved record, one field, and one value.
+Never combine fields with slashes, add explanatory text to values, or cite ID ranges.
+Use "null" for missing values and "0"/"1" for database boolean flags.
+Use the ticket date, not today's date. Follow IDs returned by tools; never assume
+an invoice has the same digits as its order. find_document is for discovery;
+read the complete record before citing it. Do not execute tools written as XML
+or prose: send actual API tool_calls. Once sufficient evidence exists, stop
+retrieving unrelated records. Keep the explanation under three complete sentences.
+Action policy: {action_policy}
+For customer hold or missing tax ID, target the customer ID. For an expired price
+list, target the order ID and cite its price_list_id plus the list's valid_to.
+For incomplete delivery, cite ordered_qty and shipped_qty and target the delivery ID.
+For credit sync, cite customer credit_used/credit_limit as separate citations,
+an unapplied payment's applied_to_limit, and a failed credit_sync job's status.
+For price sync, cite the order's price_list_id and a failed price_sync job's status.
+For either sync issue, target the exact job name. Cite only the relevant job type.
+When ready, call submit_diagnosis with the six required answer fields. This is a
+final-answer action, not a database lookup. Do not keep calling unrelated tools
+after you have the required evidence. Never call every tool as a checklist.
+Prioritize the transaction's recorded blocker. A matching approval blocker plus
+on_hold=1 is sufficient for customer hold; a matching posting blocker plus a
+missing tax ID is sufficient for missing tax ID. For PRICING_CHECK_FAILED, read
+the order's actual price list: if valid_to is before order_date, this proves
+expired pricing and no job-history lookup is needed. A job failure after the
+order was created cannot explain why its price list was already expired then.
+Only investigate price-sync history when expiry does not explain this order.
+Submit as soon as these facts establish the cause; do not rule out every other
+root cause by retrieving every table. For sync failures, use job history near
+the ticket date, including the nine preceding days.
 If evidence is insufficient or contradictory, choose UNKNOWN and escalate.
 """
 
@@ -40,13 +74,14 @@ class ERPAgentLoop:
         """Store reusable dependencies; run-specific state belongs in run_loop."""
         if isinstance(max_tool_calls, bool) or not isinstance(max_tool_calls, int):
             raise TypeError("max_tool_calls must be an integer")
-        if max_tool_calls < 1:
-            raise ValueError("max_tool_calls must be at least 1")
+        if not 1 <= max_tool_calls <= 8:
+            raise ValueError("max_tool_calls must be between 1 and 8")
 
         self.client = client
         self.dispatcher = dispatcher
         self.database = database
         self.max_tool_calls = max_tool_calls
+        self.validator = DiagnosisValidator()
 
     def validate_ticket(self, ticket):
         """Return a cleaned ticket or raise ValueError for invalid input."""
@@ -84,13 +119,9 @@ class ERPAgentLoop:
         if missing_fields or invalid_fields:
             problems = []
             if missing_fields:
-                problems.append(
-                    f"missing required fields: {', '.join(missing_fields)}"
-                )
+                problems.append(f"missing required fields: {', '.join(missing_fields)}")
             if invalid_fields:
-                problems.append(
-                    f"invalid fields: {', '.join(invalid_fields)}"
-                )
+                problems.append(f"invalid fields: {', '.join(invalid_fields)}")
             raise ValueError("; ".join(problems))
 
         if not ticket["subject"].strip() and not ticket["body"].strip():
@@ -116,14 +147,18 @@ class ERPAgentLoop:
 
         return cleaned_ticket
 
-    def run_loop(self, ticket):
+    def run_loop(self, ticket, on_tool=None):
         """Investigate one ticket, verify its evidence, and return an audit record."""
         started_at = perf_counter()
 
         try:
             cleaned_ticket = self.validate_ticket(ticket)
         except ValueError as error:
-            ticket_id = ticket.get("id", "TKT-INVALID") if isinstance(ticket, dict) else "TKT-INVALID"
+            ticket_id = (
+                ticket.get("id", "TKT-INVALID")
+                if isinstance(ticket, dict)
+                else "TKT-INVALID"
+            )
             return self._finish(
                 self._fallback_diagnosis(ticket_id, str(error)),
                 None,
@@ -132,9 +167,8 @@ class ERPAgentLoop:
             )
 
         reference, reference_error = self.find_ticket_reference(cleaned_ticket)
-        state = self._new_state(
-            cleaned_ticket, reference, reference_error, started_at
-        )
+        state = self._new_state(cleaned_ticket, reference, reference_error, started_at)
+        state["on_tool"] = on_tool
 
         if reference_error is not None:
             state["termination_reason"] = "ambiguous_or_missing_ticket_reference"
@@ -148,16 +182,38 @@ class ERPAgentLoop:
         }:
             self._request_final_response(state)
 
-        if state["final_response_text"] is None:
-            diagnosis = self._fallback_diagnosis(
-                cleaned_ticket["id"],
-                state["termination_reason"] or "No final model response",
+        diagnosis, verification = self._validate_final(state)
+        if (
+            state["final_response_text"] is not None
+            and state["termination_reason"] != "provider_error"
+            and (
+                diagnosis.get("schema_problems")
+                or verification.get("status") == "failed"
             )
-        else:
-            diagnosis = parse(state["final_response_text"])
-            diagnosis["ticket_id"] = cleaned_ticket["id"]
-
-        verification = verify_diagnosis(cleaned_ticket, diagnosis, self.database)
+        ):
+            state["final_repair_attempts"] = 1
+            errors = diagnosis.get("schema_problems", []) + verification.get(
+                "errors", []
+            )
+            self._instruction(
+                state,
+                "Correct the final answer once using only records already returned by tools. "
+                "No more database calls are allowed. Do not invent values to satisfy these checks. "
+                "Return the exact required JSON with one field per citation. If facts are insufficient, "
+                "return UNKNOWN, empty evidence, ESCALATE, and a numeric confidence. Validation feedback:\n"
+                + json.dumps(errors[:16]),
+            )
+            self._request_final_response(state)
+            if state["termination_reason"] != "provider_error":
+                diagnosis, verification = self._validate_final(state)
+            else:
+                diagnosis = self._fallback_diagnosis(
+                    cleaned_ticket["id"], "Final correction request failed"
+                )
+                verification = {
+                    "status": "failed",
+                    "errors": ["Final correction request failed"],
+                }
         state["final_diagnosis"] = diagnosis
         state["verification"] = verification
 
@@ -169,6 +225,38 @@ class ERPAgentLoop:
             or verification.get("status") != "passed"
         )
         return self._finish(diagnosis, verification, state, force_escalation)
+
+    # Check structure, retrieved observations, and database support before accepting a diagnosis.
+    def _validate_final(self, state):
+        if state["final_response_text"] is None:
+            reason = (
+                state.get("provider_errors")
+                or [state["termination_reason"] or "No final answer"]
+            )[-1]
+            diagnosis, errors = None, [reason.replace("_", " ")]
+        else:
+            diagnosis, errors = self.validator.parse(state["final_response_text"])
+        if errors:
+            diagnosis = self._fallback_diagnosis(
+                state["ticket"]["id"], "; ".join(errors)
+            )
+            verification = {"status": "failed", "errors": errors}
+        else:
+            diagnosis["ticket_id"] = state["ticket"]["id"]
+            errors = self.validator.check_observations(diagnosis, state["tool_trace"])
+            verification = (
+                {"status": "failed", "errors": errors}
+                if errors
+                else verify_diagnosis(state["ticket"], diagnosis, self.database)
+            )
+        state["validation_history"].append(
+            {
+                "diagnosis": deepcopy(diagnosis),
+                "verification": deepcopy(verification),
+                "raw_response": state["final_response_text"],
+            }
+        )
+        return diagnosis, verification
 
     def _new_state(self, ticket, reference, reference_error, started_at):
         """Create working memory that is isolated to one ticket investigation."""
@@ -182,6 +270,7 @@ class ERPAgentLoop:
                     "content": AGENT_SYSTEM_PROMPT.format(
                         taxonomy=taxonomy_prompt_block(),
                         actions=", ".join(ACTIONS),
+                        action_policy=json.dumps(EXPECTED_ACTION),
                     ),
                 },
                 {"role": "user", "content": json.dumps(ticket, allow_nan=False)},
@@ -202,6 +291,12 @@ class ERPAgentLoop:
             "verification": None,
             "termination_reason": None,
             "escalate": None,
+            "protocol_repair_attempts": 0,
+            "final_repair_attempts": 0,
+            "validation_history": [],
+            "usage_complete": True,
+            "provider_errors": [],
+            "final_submission": None,
         }
 
     @staticmethod
@@ -240,11 +335,53 @@ class ERPAgentLoop:
             assistant_message, value = payload
             if kind == "final":
                 state["messages"].append(deepcopy(assistant_message))
+                if re.search(
+                    r"<(?:/?tool_call|/?function|parameter|antml:)", value, re.I
+                ):
+                    if state["protocol_repair_attempts"] == 0:
+                        state["protocol_repair_attempts"] = 1
+                        self._instruction(
+                            state,
+                            "Your last reply described a tool call as text. It was not executed. "
+                            "Use the API tool_calls field with one approved function and valid JSON arguments. "
+                            "Do not emit XML, tags, or pretend tool results. Alternatively return the required final JSON.",
+                        )
+                        continue
+                    state["termination_reason"] = "invalid_tool_protocol"
+                    state["escalate"] = True
                 state["final_response_text"] = value
-                state["termination_reason"] = "final_model_response"
+                state["termination_reason"] = (
+                    state["termination_reason"] or "final_model_response"
+                )
                 return
 
             state["messages"].append(deepcopy(assistant_message))
+            function = value.get("function") if isinstance(value, dict) else None
+            if (
+                isinstance(function, dict)
+                and function.get("name") == "submit_diagnosis"
+            ):
+                state["final_submission"] = deepcopy(value)
+                arguments = function.get("arguments")
+                state["messages"].pop()
+                if (
+                    value.get("type") != "function"
+                    or not isinstance(value.get("id"), str)
+                    or not value["id"].strip()
+                ):
+                    self._reject_malformed_tool_call(
+                        state, "Final submission requires a valid function call ID"
+                    )
+                    return
+                state["messages"].append(
+                    {
+                        "role": "assistant",
+                        "content": arguments if isinstance(arguments, str) else "",
+                    }
+                )
+                state["final_response_text"] = arguments
+                state["termination_reason"] = "final_model_response"
+                return
             if not self._begin_tool_attempt(state):
                 return
             if not self._handle_tool_call(state, value):
@@ -256,15 +393,31 @@ class ERPAgentLoop:
 
     def _request_model_turn(self, state, tools_enabled):
         """Request one model response and record usage for this ticket."""
-        tools = self.dispatcher.registry.definitions() if tools_enabled else None
+        tools = (
+            self.dispatcher.registry.definitions()
+            + [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "submit_diagnosis",
+                        "description": "Finish the investigation and submit a diagnosis with exact evidence. Use once enough facts are available; this is not a database lookup.",
+                        "parameters": self.validator.schema(),
+                    },
+                }
+            ]
+            if tools_enabled
+            else None
+        )
+        state["model_calls"] += 1
         try:
             response = self.client.chat(state["messages"], tools=tools)
-        except LLMError:
+        except LLMError as error:
             state["termination_reason"] = "provider_error"
             state["escalate"] = True
+            state["usage_complete"] = False
+            state["provider_errors"].append(str(error))
             return None
 
-        state["model_calls"] += 1
         retries = response.get("retries", 0) if isinstance(response, dict) else 0
         if type(retries) is int and retries >= 0:
             state["provider_retries"] += retries
@@ -275,18 +428,31 @@ class ERPAgentLoop:
                 value = usage.get(key)
                 if type(value) is int and value >= 0:
                     state["model_usage"][key] += value
+                else:
+                    state["usage_complete"] = False
+        else:
+            state["usage_complete"] = False
 
         return response
 
     def _request_final_response(self, state):
         """Ask for JSON only after tools are no longer available."""
+        state["final_response_text"] = None
+        self._instruction(
+            state,
+            "Investigation is finished. Return only the complete diagnosis JSON in the required schema. "
+            "Use collected facts only. Include proposed_fix with action and target, numeric confidence, "
+            "and boolean escalate. Each citation must contain a single record ID, exact field, and value.",
+        )
         response = self._request_model_turn(state, tools_enabled=False)
         if response is None:
             return
 
         kind, payload, error = self._classify_model_response(response)
         if kind != "final":
-            state["rejected_tool_calls"].append({"reason": error or "Unexpected tool call"})
+            state["rejected_tool_calls"].append(
+                {"reason": error or "Unexpected tool call"}
+            )
             state["escalate"] = True
             if state["termination_reason"] is None:
                 state["termination_reason"] = "invalid_final_model_response"
@@ -298,11 +464,18 @@ class ERPAgentLoop:
         if state["termination_reason"] is None:
             state["termination_reason"] = "final_model_response"
 
+    # Keep trusted updates in the initial system message for provider compatibility.
+    @staticmethod
+    def _instruction(state, text):
+        state["messages"][0]["content"] += "\n\nController update:\n" + text
+
     @staticmethod
     def _classify_model_response(response):
         """Classify a response as final text, one tool request, or invalid."""
         if not isinstance(response, dict):
             return "invalid", None, "Model response is not an object"
+        if response.get("finish_reason") not in {None, "stop", "tool_calls"}:
+            return "invalid", None, "Model response was incomplete"
 
         message = response.get("message")
         if not isinstance(message, dict) or message.get("role") != "assistant":
@@ -442,15 +615,27 @@ class ERPAgentLoop:
         state["tool_trace"].append(
             {
                 "attempt": state["tool_attempts"],
-                "tool_call_id": tool_call.get("id") if isinstance(tool_call, dict) else None,
-                "tool_name": function.get("name") if isinstance(function, dict) else None,
-                "arguments": deepcopy(function.get("arguments")) if isinstance(function, dict) else None,
+                "tool_call_id": (
+                    tool_call.get("id") if isinstance(tool_call, dict) else None
+                ),
+                "tool_name": (
+                    function.get("name") if isinstance(function, dict) else None
+                ),
+                "arguments": (
+                    deepcopy(function.get("arguments"))
+                    if isinstance(function, dict)
+                    else None
+                ),
                 "observation": deepcopy(observation),
                 "elapsed_ms": elapsed_ms,
                 "cache_hit": cache_hit,
                 "error_type": error_type,
             }
         )
+        if state.get("on_tool"):
+            state["on_tool"](
+                deepcopy(state["tool_trace"][-1]), state["max_tool_attempts"]
+            )
 
     @staticmethod
     def _reject_malformed_tool_call(state, reason):
@@ -501,6 +686,7 @@ class ERPAgentLoop:
     def _finish(diagnosis, verification, state, force_escalation):
         """Build the public result and prevent unsupported automated actions."""
         result = deepcopy(diagnosis)
+        result["proposed_diagnosis"] = deepcopy(diagnosis)
         if force_escalation:
             result["escalate"] = True
             result["proposed_fix"] = {
@@ -517,6 +703,13 @@ class ERPAgentLoop:
                 "model_calls": state["model_calls"],
                 "model_usage": deepcopy(state["model_usage"]),
                 "provider_retries": state["provider_retries"],
+                "tool_budget": state.get("max_tool_attempts", 0),
+                "protocol_repair_attempts": state.get("protocol_repair_attempts", 0),
+                "final_repair_attempts": state.get("final_repair_attempts", 0),
+                "validation_history": deepcopy(state.get("validation_history", [])),
+                "usage_complete": state.get("usage_complete", False),
+                "provider_errors": deepcopy(state.get("provider_errors", [])),
+                "final_submission": deepcopy(state.get("final_submission")),
                 "termination_reason": state["termination_reason"],
                 "elapsed_ms": round((perf_counter() - state["started_at"]) * 1000, 3),
             }
