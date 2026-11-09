@@ -10,6 +10,7 @@ DEFAULT_MODEL = {
     "openai": "gpt-4o-mini",
     "mock": "mock-stub-v1",
     "groq": "openai/gpt-oss-20b",
+    "voyager": "qwen38-27b",
 }
 
 
@@ -66,6 +67,16 @@ def complete(prompt, provider="mock", model=None, temperature=0.0):
 
     if provider == "mock":
         return _mock(prompt), {"input_tokens": len(prompt) // 4, "output_tokens": 60}
+
+    if provider == "voyager":
+        from agents.voyager_client import VoyagerToolClient
+
+        reply = VoyagerToolClient(model=model).chat(
+            [{"role": "user", "content": prompt}], temperature=temperature
+        )
+        if reply["finish_reason"] != "stop" or reply["message"].get("tool_calls"):
+            raise LLMError("Voyager did not return a complete text-only baseline answer")
+        return reply["message"]["content"], reply["usage"]
 
     if provider == "gemini":
         key = os.environ.get("GEMINI_API_KEY")
