@@ -1,0 +1,105 @@
+Section 3. Preliminary Evaluation Results and Analysis
+
+We compared the adaptive agent with B0, B1, and the new B1-DB fixed database baseline. All four systems received the same 60 tickets: 18 original reference tickets, 30 supported test cases, and 12 unsupported cases. We completed 240 system runs. The original B1 remains a ticket-only baseline; B1-DB is reported separately.
+
+Data and evaluation setup
+
+The datasets come from the project's MIT-licensed synthetic ERP generator. They cover customer holds, missing tax IDs, expired price lists, incomplete deliveries, failed credit synchronization, and failed price synchronization. These tasks match the stakeholder's need to explain blocked transactions using database evidence. Fault injection supplies the correct labels and expected actions. The fault_log answer key is read only by the scorer after diagnosis and is never given to the model. No real customer data is used.
+
+Dataset 1 is the original seed-42 world: 18 tickets, three per cause, sharing one database. All 18 were evaluated. Some tickets were previously used to debug the system, so this is a development/reference comparison.
+
+Dataset 2 has 60 development cases and 30 supported test cases, with ten and five cases per cause. Each starts from a fresh ERP world with one intentional fault. All 30 test cases were evaluated; the 60 development cases were excluded. Development uses seeds 10000-10059 and test uses 20000-20029, with separate record IDs. Database integrity, record links, and direct label leakage were checked. Intentional fault values were preserved as evidence.
+
+A separate set of 12 unsupported cases uses seeds 30000-30011, with four cases each for export-license requirements, duplicate-document review, and pending bank confirmation. These cases contain valid invoice references but causes outside the allowed taxonomy. Their expected result is UNKNOWN and escalation. The development, supported test, and unsupported sets total the 102 cases planned in Milestone 1.
+
+All sets are synthetic and share wording templates. IDs and seeds are separate, but fully separate wording has not been achieved. The original agent was evaluated before its test results were examined. B1-DB was added afterward and tested on the same cases without further prompt changes during its run. The combined results are a preliminary comparison on a previously evaluated set, not fresh held-out confirmation for B1-DB. No independent public benchmark or real ERP dataset was evaluated.
+
+Systems and conditions
+
+B0 uses keyword rules without a model or database access. B1 makes one language-model call using ticket text and allowed cause/action lists, without database access. They show what ticket wording alone can achieve.
+
+B1-DB first follows a predefined read-only sequence: invoice, sales order, customer, deliveries, payments, price list, credit-sync history, and price-sync history. Invoice tickets use eight lookups; order tickets omit the invoice lookup and use seven. Job queries cover the ticket date and preceding 14 days. The sequence follows returned record IDs but does not change based on the blocker, confidence, or suspected cause. After retrieval, the model makes one diagnosis call. It cannot choose tools or request more data. Its final answer passes the same citation and relationship checks as the agent, without an answer-repair call.
+
+The adaptive agent chooses its next lookup from previous observations and stops when evidence is sufficient or eight lookups are used. It uses a typed final-answer action and can attempt one tool-format correction and one final-answer correction. Verification failure or an exhausted budget can force escalation.
+
+B1, B1-DB, and the agent use Voyager qwen38-27b at temperature 0 and reasoning_effort=none, with 4096 output tokens per request, a 120-second timeout, and at most two provider retries. Evaluation used two workers. B1-DB's 60 runs were added in a second phase; the original 180 results were preserved. A source fingerprint confirmed that the original baseline, agent, tool, verifier, and generator files did not change between phases. Latency includes shared-service queueing, so it is not a controlled speed benchmark.
+
+Metrics and scoring
+
+Cause accuracy is the percentage matching the hidden root-cause label. Full resolution requires the correct cause and action, relevant evidence, passing verification, valid JSON, and no escalation. It measures a diagnosis and recommended action, not an actual database repair.
+
+Evidence accuracy counts correct record/field/value citations divided by all final citations; no citations means N/A. Agent and B1-DB citations must also match retrieved observations. We separately track invented record IDs. Correct unsupported escalation requires UNKNOWN, action ESCALATE, escalation=true, valid JSON, and no provider failure. Escalating every supported ticket does not count as resolving it.
+
+Lookup success counts status=ok results divided by all lookup attempts; not_found is safely handled but not a successful retrieval. Lookup counts exclude the verifier's individual SQL queries. We measured JSON validity, repeated calls, corrections, provider errors, database changes, tokens, and latency. Tokens sum provider-reported input and output across model calls. Latency includes retrieval, model requests, and system verification, excluding external answer-key scoring. Scoring is automatic, without a human or LLM judge. Billing was not measured; tokens are the cost proxy.
+
+Measured results
+
+Dataset 1: original 18 reference tickets
+
+System | Cases | Cause accuracy | Full resolution | Evidence accuracy
+--- | --- | --- | --- | ---
+B0: keyword rules | 18 | 6/18 (33.3%) | 0/18 (0.0%) | N/A: no citations
+B1: ticket only | 18 | 0/18 (0.0%) | 0/18 (0.0%) | N/A: no citations
+B1-DB: fixed workflow | 18 | 17/18 (94.4%) | 6/18 (33.3%) | 48/48 (100.0%)
+Adaptive agent | 18 | 18/18 (100.0%) | 16/18 (88.9%) | 75/75 (100.0%)
+
+Dataset 2: 30 supported test cases
+
+System | Cases | Cause accuracy | Full resolution | Evidence accuracy
+--- | --- | --- | --- | ---
+B0: keyword rules | 30 | 10/30 (33.3%) | 0/30 (0.0%) | N/A: no citations
+B1: ticket only | 30 | 0/30 (0.0%) | 0/30 (0.0%) | N/A: no citations
+B1-DB: fixed workflow | 30 | 30/30 (100.0%) | 12/30 (40.0%) | 79/79 (100.0%)
+Adaptive agent | 30 | 30/30 (100.0%) | 27/30 (90.0%) | 130/130 (100.0%)
+
+Execution measures: averages per ticket
+
+Dataset | System | Mean lookups | Mean tokens | Mean time
+--- | --- | --- | --- | ---
+Original 18 | B0: keyword rules | 0.00 | 0 | <0.01s
+Original 18 | B1: ticket only | 0.00 | 608 | 4.66s
+Original 18 | B1-DB: fixed workflow | 7.50 | 3,031 | 8.55s
+Original 18 | Adaptive agent | 3.61 | 14,710 | 16.87s
+Isolated 30 | B0: keyword rules | 0.00 | 0 | <0.01s
+Isolated 30 | B1: ticket only | 0.00 | 622 | 4.82s
+Isolated 30 | B1-DB: fixed workflow | 7.50 | 3,186 | 9.39s
+Isolated 30 | Adaptive agent | 3.43 | 14,244 | 18.57s
+
+Unsupported set: 12 cases per system
+
+System | Correct UNKNOWN + escalation | Mean lookups | Mean tokens | Mean time
+--- | --- | --- | --- | ---
+B0: keyword rules | 0/12 (0.0%) | 0.00 | 0 | <0.01s
+B1: ticket only | 12/12 (100.0%) | 0.00 | 585 | 5.09s
+B1-DB: fixed workflow | 12/12 (100.0%) | 8.00 | 3,126 | 8.07s
+Adaptive agent | 12/12 (100.0%) | 5.92 | 22,425 | 22.29s
+
+B0 asks for review but still predicts a supported cause on unsupported invoices, so it fails the UNKNOWN-plus-escalation criterion. B1's UNKNOWN answers are appropriate on unsupported cases, but count as incorrect on supported cases. JSON passed the required-format check in 240/240 runs; token usage was available for 240/240. There were 0 provider-error cases. Unsupported escalation is reported separately from supported full resolution.
+
+Analysis
+
+Adding database records raised B1's supported cause accuracy from 0/30 to 30/30 for B1-DB. The adaptive agent achieved 30/30. This supports the value of database evidence; it does not show an accuracy advantage for adaptive lookup over fixed lookup in this sample.
+
+B1-DB fully resolved 12/30 supported cases, compared with 27/30 for the agent. Among B1-DB's unresolved cases, 10 failed the exact action-target check and 8 lacked required supporting citations. For example, an answer could name the right cause but use a decorated target instead of the exact record ID, or omit the order's price_list_id from its evidence. Such answers were escalated rather than silently accepted. The agent has a different final-answer mechanism and bounded recovery, so the full-resolution difference cannot be attributed only to adaptive retrieval.
+
+On the original reference set, B1-DB found 17/18 causes. For TKT-1018, it selected a credit-sync cause from real customer/payment/job records even though the ticket concerned a pricing-blocked order. The verifier rejected that answer. This shows why correct citation values alone do not prove that a diagnosis explains the specific transaction.
+
+The agent used 103 lookups on the supported test set, compared with 225 for B1-DB: 54.2% fewer lookups. However, B1-DB sends its gathered context once, while the agent sends investigation history across several model calls. The measured token and time results show why fewer database lookups do not necessarily mean lower language-model cost or latency. These are whole-system comparisons, not a controlled ablation of planning alone. A stronger controlled comparison should share the same final-answer interface and include a rule-based branching workflow; the measured lookup savings here are relative to this fixed checklist.
+
+Three supported agent cases reached the eight-call budget despite finding the correct cause and were escalated. Across all 42 test/unsupported agent cases, lookup success was 165/174 (94.83%), below the 95% target. There were 9 not-found calls and no exact repeated calls. All 202 final citations were correct. B1-DB and B1 also demonstrate that database investigation is not automatically needed to choose a cautious escalation on unsupported tickets.
+
+Milestone 1 target status
+
+Measure | Target | Agent result | Status
+--- | --- | --- | ---
+Supported cause accuracy | At least 75% | 30/30 (100.0%) | Met
+Supported full resolution | At least 65% | 27/30 (90.0%) | Met
+Evidence field/value accuracy | At least 90% | 202/202 (100.0%) | Met
+Hallucinated evidence | At most 5% | 0/42 tickets with invented IDs; 0 invalid citations | Met
+Correct unsupported escalation | At least 80% | 12/12 (100.0%) | Met
+Successful lookups | At least 95% | 165/174 (94.83%) | Not met
+Read-only and answer-key isolation | No writes or hidden-table access | 42/42 databases unchanged; no prohibited attempts | Met
+Lookup budget | At most eight per ticket | Maximum eight | Met
+Stakeholder usefulness | At least 4/5 across at least ten diagnoses | Numeric ratings have not been collected | Not yet measured
+
+Cause accuracy and resolution use the 30 supported cases; evidence, lookup reliability, and safety use all 42 supported/unsupported cases. The original reference set is excluded from this target check. Remaining evaluation work includes reducing unnecessary lookups, collecting stakeholder ratings, testing varied wording, and repeating the comparison on fresh cases. Any changes informed by these results require fresh held-out evaluation. The fixed database comparison is now implemented; an independent benchmark and a controlled comparison of retrieval alone remain future work.

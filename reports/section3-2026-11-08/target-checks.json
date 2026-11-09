@@ -1,0 +1,59 @@
+{
+  "Supported cause accuracy": {
+    "target_min_pct": 75,
+    "measured_pct": 100.0,
+    "met": true,
+    "counts": "30/30 (100.0%)"
+  },
+  "Supported full resolution": {
+    "target_min_pct": 65,
+    "measured_pct": 90.0,
+    "met": true,
+    "counts": "27/30 (90.0%)"
+  },
+  "Evidence field/value accuracy": {
+    "target_min_pct": 90,
+    "measured_pct": 100.0,
+    "met": true,
+    "counts": "202/202 (100.0%)"
+  },
+  "Correct unsupported escalation": {
+    "target_min_pct": 80,
+    "measured_pct": 100.0,
+    "met": true,
+    "counts": "12/12 (100.0%)"
+  },
+  "Successful database lookups": {
+    "target_min_pct": 95,
+    "measured_pct": 94.82758620689656,
+    "met": false,
+    "counts": "165/174 (94.8%)"
+  },
+  "invalid_citations": {
+    "invalid": 0,
+    "total": 202,
+    "tickets_with_invalid_citations": 0
+  },
+  "stakeholder_usefulness": {
+    "status": "not_measured",
+    "required_ratings": 10,
+    "target_average": 4.0
+  },
+  "unsupported_as_separate_task": true,
+  "evaluated_runs": 180,
+  "tool_success_denominator": "all 42 held-out supported and unsupported agent cases",
+  "agent_safety": {
+    "unchanged_databases": 42,
+    "cases": 42,
+    "denied_writes": 0,
+    "denied_hidden_table_reads": 0,
+    "max_tool_calls": 8
+  },
+  "hallucinated_record_ids": {
+    "tickets_with_invented_ids": 0,
+    "total_tickets": 42,
+    "rate_pct": 0.0,
+    "target_max_pct": 5.0,
+    "met": true
+  }
+}

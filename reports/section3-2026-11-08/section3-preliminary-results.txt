@@ -1,0 +1,93 @@
+Section 3. Preliminary Evaluation Results and Analysis
+
+We compared the current adaptive ERP agent with B0 and B1 on two synthetic datasets and a separate unsupported-case set. Each system received the same tickets. We completed 180 system runs across 60 tickets. These are preliminary results from one pass, not final evidence of performance on real ERP data.
+
+Datasets and split
+
+The data comes from the project's MIT-licensed erpsim.build_world generator. It contains synthetic ERP records and support tickets about six causes: customer holds, missing tax IDs, expired price lists, incomplete deliveries, failed credit synchronization, and failed price synchronization. Correct causes and actions come from the fault injector. The hidden fault_log table is used only by the scorer after a diagnosis, never as model input. No real customer records were used. These tasks match the stakeholder's need to explain blocked transactions using records and escalate unsupported cases.
+
+Dataset 1 is the original seed-42 world, with 18 tickets: three per cause. Several faults share one ERP database. All 18 tickets were evaluated. This is a development/reference dataset because examples from it were previously used to debug the system. Its results should not be treated as held-out performance.
+
+Dataset 2 contains isolated fault cases. We generated 60 development cases and 30 held-out supported test cases, with 10 and 5 cases per cause respectively. Each case starts from a fresh ERP world with one intentional fault. Development seeds are 10000-10059 and test seeds are 20000-20029. IDs and seeds are separate across splits. All 30 test cases were evaluated; the 60 development cases were not included in these results. This tests whether the system follows database evidence without interference from other injected faults.
+
+We also evaluated 12 unsupported cases using seeds 30000-30011. They contain valid invoice references and blockers outside the six supported causes: export-license requirements, duplicate-document review, and pending bank confirmation, with four cases each. The expected result is UNKNOWN and escalation. Together, the development, supported test, and unsupported sets contain the 102 cases planned in Milestone 1.
+
+We checked database integrity, duplicate case IDs, record links, and direct root-cause label leakage in ticket text. Intentional fault values were kept because they are the evidence to diagnose. Databases were fingerprinted before the run. Development and test cases still reuse the generator's wording templates, although IDs, names, and seeds differ. Therefore, this does not yet meet the Milestone 1 goal of fully separate ticket wording. Both datasets come from the same generator, so they do not establish generalization to an independent benchmark or real stakeholder tickets.
+
+Systems and evaluation conditions
+
+B0 uses keyword rules on the ticket. It predicts incomplete delivery when it sees "invoice" and customer hold when it sees "order." It has no model or database access and returns no evidence. This measures how far simple wording rules can go.
+
+B1 makes one language-model call using only the ticket and allowed cause/action lists. It has no database tools. It is instructed to escalate when it cannot verify a cause. This provides a comparison with a language model that cannot inspect ERP records.
+
+The agent chooses read-only database tools using earlier observations. It has an eight-lookup limit and verifies the final JSON, retrieved evidence, database values, relationships, and action. It allows one tool-format correction and one final-answer correction before escalating. Final submission and local verification do not consume the lookup budget.
+
+B1 and the agent used Voyager's qwen38-27b, temperature 0, reasoning_effort=none, 4096 output tokens per request, a 120-second timeout, and at most two provider retries. Two evaluation workers were used. No prompt or controller changes were made during evaluation or in response to held-out results. The fixed database-workflow baseline is not implemented; B0 and B1 are the two completed baselines.
+
+Metrics and scoring
+
+Cause accuracy is the percentage of tickets whose predicted cause matches the hidden label. Full resolution requires the correct cause and action, evidence linked to the causal path, passing relationship/evidence verification, valid final JSON, and no escalation. It measures a supported diagnosis and recommended action; the system does not repair ERP records.
+
+Evidence field/value accuracy is the number of correct final citations divided by all final citations. Each cited record, field, and value is checked against SQLite. The agent also requires its citations to match retrieved observations. A system that cites nothing receives N/A for citation accuracy, rather than 100%. Invalid-citation rate is the complement of field/value accuracy; tickets containing invented record IDs are tracked separately. Correct unsupported escalation requires UNKNOWN, action ESCALATE, escalation=true, valid JSON, and no provider failure. Merely escalating every ticket does not count as solving supported cases.
+
+Tool success is the percentage of attempted lookups returning status=ok. A safely handled not_found result does not count as a successful retrieval. Counts exclude the verifier's individual SQL queries. We also measured repeated calls, budget stops, corrections, JSON validity, provider failures, and database changes. Latency includes API waits and recovery but excludes external scoring. Tokens are provider-reported input plus output across all model calls. Billing was not independently measured; tokens are the cost proxy. Scoring is automatic, without a human or LLM judge.
+
+Measured results
+
+Dataset 1: seed-42 mixed world, 18 reference tickets per system
+
+System | Cases | Cause accuracy | Full resolution | Evidence field/value accuracy | Mean DB calls | Mean tokens | Mean time
+--- | --- | --- | --- | --- | --- | --- | ---
+B0: keyword rules | 18 | 6/18 (33.3%) | 0/18 (0.0%) | N/A: no citations | 0.00 | 0 | <0.01s
+B1: one model call | 18 | 0/18 (0.0%) | 0/18 (0.0%) | N/A: no citations | 0.00 | 608 | 4.66s
+Adaptive agent | 18 | 18/18 (100.0%) | 16/18 (88.9%) | 75/75 (100.0%) | 3.61 | 14,710 | 16.87s
+
+Dataset 2: isolated held-out supported cases, 30 tickets per system
+
+System | Cases | Cause accuracy | Full resolution | Evidence field/value accuracy | Mean DB calls | Mean tokens | Mean time
+--- | --- | --- | --- | --- | --- | --- | ---
+B0: keyword rules | 30 | 10/30 (33.3%) | 0/30 (0.0%) | N/A: no citations | 0.00 | 0 | <0.01s
+B1: one model call | 30 | 0/30 (0.0%) | 0/30 (0.0%) | N/A: no citations | 0.00 | 622 | 4.82s
+Adaptive agent | 30 | 30/30 (100.0%) | 27/30 (90.0%) | 130/130 (100.0%) | 3.43 | 14,244 | 18.57s
+
+Unsupported cases: 12 held-out tickets per system
+
+System | Cases | Correct UNKNOWN + escalation | Mean DB calls | Mean tokens | Mean time
+--- | --- | --- | --- | --- | ---
+B0 | 12 | 0/12 (0.0%) | 0.00 | 0 | <0.01s
+B1 | 12 | 12/12 (100.0%) | 0.00 | 585 | 5.09s
+Adaptive agent | 12 | 12/12 (100.0%) | 5.92 | 22,425 | 22.29s
+
+Unsupported cases are scored for correct escalation, not successful diagnosis or repair. B0 requests human review, but it still predicts a supported cause for these invoices; that does not meet the UNKNOWN-plus-escalation rule. N/A means no evidence citations were provided. Times and token figures are means per ticket; B0 uses no model tokens. Provider-reported usage is complete for 180/180 runs. Final JSON passed the required-format check in 180/180 runs. There were 0 recorded provider-error cases overall.
+
+Milestone 1 target check
+
+Cause accuracy and full resolution below use the 30 supported held-out cases. Evidence, tool reliability, and safety below use all 42 held-out supported and unsupported cases; development/reference tickets are excluded.
+
+Milestone 1 measure | Target | Measured result | Status
+--- | --- | --- | ---
+Supported cause accuracy | At least 75% | 30/30 (100.0%) | Met
+Supported full resolution | At least 65% | 27/30 (90.0%) | Met
+Evidence field/value accuracy | At least 90% | 202/202 (100.0%) | Met
+Correct unsupported escalation | At least 80% | 12/12 (100.0%) | Met
+Successful database lookups | At least 95% | 165/174 (94.8%) | Not met
+Hallucinated evidence | At most 5% | 0/42 tickets with invented IDs; 0/202 invalid field/value citations | Met
+Database writes and hidden answer-key access | None | 0 attempted writes; 0 attempted hidden-table reads; 42/42 databases unchanged | Met
+Database call budget | At most 8 per ticket | Maximum 8 | Met
+Stakeholder usefulness | Mean at least 4/5 on at least 10 diagnoses | Numeric ratings have not been collected | Not yet measured
+
+Analysis
+
+On the supported held-out set, the agent found the correct cause in 30/30 cases and fully resolved 27/30. Database access allows it to distinguish causes that share the same vague ticket wording. The comparison shows the value of the database-enabled system over text-only methods. It does not isolate the benefit of adaptive query selection over a fixed database workflow, because that comparison has not been run.
+
+Three supported cases reached the eight-call limit even though their final cause was correct. One was a customer hold and two were failed price synchronization. The agent made unnecessary follow-up queries, including empty historical job searches and one invoice ID guessed from an order ID. Their final action was changed to escalation, so they correctly count as unresolved. This separates finding a cause from completing the task safely.
+
+On the original mixed dataset, the agent diagnosed 18/18 and resolved 16/18. Both unresolved cases also reached the eight-call limit. Shared records can contain several injected conditions; this previously used dataset is a reference comparison.
+
+B1's caution is useful for unsupported tickets: it correctly escalated 12/12. The agent correctly escalated 12/12. Database investigation is therefore not automatically better for every task. It also costs more tokens and time than one model call. These runs do not yet demonstrate better query efficiency than a fixed workflow.
+
+Across the 42 held-out agent runs, there were 174 lookup attempts, 165 successful retrievals, 9 not-found results, and 0 exact repeated calls. The system used 0 tool-format corrections and 0 final-answer corrections. There were 0 recorded provider-error cases. These observations measure this run; they do not replace dedicated network-failure, malformed-input, or prompt-injection tests.
+
+Remaining evaluation work
+
+Remaining experiments are numeric stakeholder ratings for at least 10 diagnoses, broader ticket wording, repeated runs, and a fixed database workflow for the query-efficiency comparison. Changes informed by these results need a fresh held-out evaluation. The current sample is small and synthetic; shared-service queueing affects latency. No independent external benchmark has been evaluated.

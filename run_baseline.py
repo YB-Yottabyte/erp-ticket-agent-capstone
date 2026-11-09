@@ -6,6 +6,8 @@ import sys
 import time
 
 from agents.baseline import run_b0, run_b1
+from agents.fixed_workflow import FixedDatabaseBaseline
+from tools.database import ERPDatabase
 from agents.llm import LLMError
 from eval.score import fault_for, render, score_one, summarise
 
@@ -51,7 +53,7 @@ def main():
     src.add_argument("--input", help="path to a ticket text file")
     src.add_argument("--ticket", help="ticket id from the database")
     src.add_argument("--all", action="store_true", help="every generated ticket")
-    ap.add_argument("--baseline", choices=["b0", "b1"], default="b1")
+    ap.add_argument("--baseline", choices=["b0", "b1", "b1-db"], default="b1")
     ap.add_argument("--provider", default="mock",
                     choices=["mock", "gemini", "anthropic", "openai", "groq", "voyager"])
     ap.add_argument("--model", default=None)
@@ -75,6 +77,8 @@ def main():
     con = sqlite3.connect(a.db)
     rows, results = [], []
     label = "B0 keyword rules" if a.baseline == "b0" else f"B1 single call ({a.provider})"
+    if a.baseline == "b1-db":
+        label = f"B1-DB fixed lookups + single model call ({a.provider})"
     print(f"baseline: {label}")
     print(f"tickets : {len(tickets)}")
     print("=" * 68)
@@ -84,6 +88,10 @@ def main():
         try:
             if a.baseline == "b0":
                 out, usage = run_b0(t)
+            elif a.baseline == "b1-db":
+                out, usage = FixedDatabaseBaseline(
+                    ERPDatabase(a.db), provider=a.provider, model=a.model
+                ).run(t)
             else:
                 out, usage = run_b1(t, provider=a.provider, model=a.model)
         except LLMError as e:
@@ -94,8 +102,14 @@ def main():
 
         print(f"\nTICKET {t['id']}  {t['subject']}")
         print("-" * 68)
-        print(json.dumps({k: v for k, v in out.items()
-                          if k not in ("schema_problems", "raw")}, indent=2))
+        fields = ("ticket_id", "root_cause_code", "root_cause_explanation",
+                  "evidence", "proposed_fix", "confidence", "escalate")
+        print(json.dumps({key: out[key] for key in fields if key in out}, indent=2))
+        if a.baseline == "b1-db":
+            print(f"  Lookups: {out['tool_attempts']}/8 | Model calls: {out['model_calls']} | "
+                  f"Verification: {out['verification']['status']}")
+            for issue in out["verification"].get("errors", []):
+                print(f"  Verification note: {issue}")
         print(f"\n  latency {elapsed:.2f}s   tokens in/out "
               f"{usage.get('input_tokens')}/{usage.get('output_tokens')}")
 
